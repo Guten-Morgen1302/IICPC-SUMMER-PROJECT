@@ -1,0 +1,252 @@
+---
+# k6 Load Testing Infrastructure for IICPC Arena
+# Uses k6-operator to distribute load testing across Kubernetes
+# Deploy with: kubectl apply -f k6-operator-setup.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bot-fleet-script
+  namespace: default
+data:
+  bot-fleet.js: |
+    import http from 'k6/http';
+    import ws from 'k6/ws';
+    import { check, sleep } from 'k6';
+    import { Counter, Trend, Gauge, Rate } from 'k6/metrics';
+
+    const BASE_URL = __ENV.BASE_URL || 'http://localhost:8000';
+    const NUM_TRADERS = parseInt(__ENV.NUM_TRADERS || '10');
+
+    const orderCounter = new Counter('orders_sent');
+    const fillCounter = new Counter('fills_received');
+    const orderLatency = new Trend('order_latency_ms');
+    const orderErrorRate = new Rate('order_errors');
+
+    function generatePrice() {
+      return 990 + Math.floor(Math.random() * 20);
+    }
+
+    function generateSide(orderId) {
+      return orderId % 2 === 0 ? 'BUY' : 'SELL';
+    }
+
+    function generateOrderType() {
+      return Math.random() < 0.8 ? 'LIMIT' : 'MARKET';
+    }
+
+    function generateQuantity() {
+      return 1 + Math.floor(Math.random() * 100);
+    }
+
+    export default function () {
+      const clientId = `client-${__VU}`;
+      
+      for (let i = 0; i < NUM_TRADERS; i++) {
+        const orderId = `${clientId}-${Date.now()}-${i}`;
+        const side = generateSide(i);
+        const price = generatePrice();
+        const quantity = generateQuantity();
+        const orderType = generateOrderType();
+        
+        const sendTimestamp = Date.now();
+        const response = http.post(
+          `${BASE_URL}/api/v1/orders`,
+          JSON.stringify({
+            orderId,
+            clientId,
+            side,
+            type: orderType,
+            price,
+            quantity,
+            timestamp: sendTimestamp * 1_000_000
+          }),
+          {
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Send-Timestamp': (sendTimestamp * 1_000_000).toString()
+            },
+            timeout: '5s'
+          }
+        );
+        
+        const receiveTimestamp = Date.now();
+        const latency = receiveTimestamp - sendTimestamp;
+        
+        check(response, {
+          'order placement status 200': (r) => r.status === 200
+        });
+        
+        orderLatency.add(latency);
+        orderCounter.add(1);
+        
+        if (response.status !== 200) {
+          orderErrorRate.add(1);
+        }
+        
+        sleep(0.01);
+      }
+    }
+
+    export const options = {
+      vus: 10,
+      duration: '60s',
+      thresholds: {
+        'order_latency_ms': ['p(95) < 100', 'p(99) < 200'],
+        'order_errors': ['rate < 0.05']
+      }
+    };
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-bot-fleet
+  namespace: default
+  labels:
+    app: k6-bot-fleet
+    scenario: benchmark
+spec:
+  parallelism: 5  # Number of k6 pods to run in parallel
+  completions: 5
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: k6-bot-fleet
+    spec:
+      serviceAccountName: k6-bot-fleet
+      restartPolicy: Never
+      containers:
+      - name: k6
+        image: grafana/k6:latest
+        args:
+          - run
+          - /scripts/bot-fleet.js
+        env:
+        - name: BASE_URL
+          value: "http://contestant-service:8000"  # Will be set dynamically per test
+        - name: NUM_TRADERS
+          value: "100"
+        - name: VUS
+          value: "10"
+        - name: TEST_DURATION
+          value: "60s"
+        - name: SCENARIO_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        volumeMounts:
+        - name: bot-script
+          mountPath: /scripts
+        resources:
+          requests:
+            cpu: 500m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 512Mi
+      volumes:
+      - name: bot-script
+        configMap:
+          name: bot-fleet-script
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - k6-bot-fleet
+              topologyKey: kubernetes.io/hostname
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k6-bot-fleet
+  namespace: default
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k6-bot-fleet
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k6-bot-fleet
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k6-bot-fleet
+subjects:
+- kind: ServiceAccount
+  name: k6-bot-fleet
+  namespace: default
+
+---
+# Test scenario configuration for a specific contestant submission
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: benchmark-scenario-template
+  namespace: default
+data:
+  scenario.yaml: |
+    # This is a template for running a benchmark scenario against a contestant service
+    # Usage: kubectl apply -f scenario.yaml
+    
+    # Generated for submission: ${SUBMISSION_ID}
+    # Contestant email: ${CONTESTANT_EMAIL}
+    # Benchmark run ID: ${RUN_ID}
+    
+    # Bot fleet configuration
+    bot_fleet:
+      num_pods: 5            # Number of k6 pods
+      vus_per_pod: 10        # Virtual users per pod
+      total_orders: 50000    # Total orders to send during test
+      test_duration: 60s     # Test duration
+    
+    # Contestant service configuration
+    service:
+      image_id: ${IMAGE_ID}
+      service_name: contestant-${SUBMISSION_ID}
+      namespace: contestant-${SUBMISSION_ID}
+      port: 8000
+      timeout: 5s
+    
+    # Load profile
+    load_profile:
+      rps_target: 10000      # Target orders per second
+      think_time_ms: 10      # Time between orders
+      
+    # Order generation
+    orders:
+      price_range: [990, 1010]
+      quantity_range: [1, 100]
+      order_types:
+        limit: 0.80
+        market: 0.20
+      sides:
+        buy: 0.5
+        sell: 0.5
+    
+    # Metrics thresholds
+    thresholds:
+      p95_latency_ms: 100
+      p99_latency_ms: 200
+      error_rate: 0.05
+      min_throughput: 5000
