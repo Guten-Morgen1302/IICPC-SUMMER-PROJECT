@@ -139,6 +139,18 @@ model Score {
   createdAt                DateTime     @default(now())
 }
 
+model CorrectnessReport {
+  id                 String       @id @default(uuid())
+  benchmarkRunId     String       @unique
+  submissionId       String
+  expectedFills      Int          // Total expected fills
+  correctFills       Int          // Number of correct fills
+  correctnessRatio   Float        // 0.0 - 1.0
+  violations         String?      // JSON string of violations
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+}
+
 model LeaderboardEntry {
   id           String   @id @default(uuid())
   submissionId String   @unique

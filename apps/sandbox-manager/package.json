@@ -14,12 +14,16 @@
     "@benchmark/logger": "workspace:*",
     "@benchmark/shared-types": "workspace:*",
     "@fastify/cors": "^8.5.0",
+    "@types/dockerode": "^3.3.35",
     "bullmq": "^5.76.8",
+    "dockerode": "^5.0.0",
     "dotenv": "^17.4.2",
     "fastify": "^4.0.0",
-    "ioredis": "^5.10.1"
+    "ioredis": "^5.10.1",
+    "kafkajs": "^2.2.4"
   },
   "devDependencies": {
+    "@types/ioredis": "^5.0.0",
     "@types/node": "^18.0.0",
     "ts-node": "^10.9.1",
     "typescript": "^5.0.0"

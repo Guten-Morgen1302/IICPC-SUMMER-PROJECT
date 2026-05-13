@@ -22,9 +22,11 @@
     "dotenv": "^17.4.2",
     "fastify": "^4.0.0",
     "ioredis": "^5.10.1",
+    "kafkajs": "^2.2.4",
     "tar": "^7.4.3"
   },
   "devDependencies": {
+    "@types/ioredis": "^5.0.0",
     "@types/node": "^18.0.0",
     "@types/tar": "^6.1.13",
     "ts-node": "^10.9.1",

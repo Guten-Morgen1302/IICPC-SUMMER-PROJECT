@@ -40,6 +40,40 @@ export interface ProcessResult {
   containerId?: string;
 }
 
+/**
+ * Claim and process the next queued BenchmarkRun.
+ * Used by HTTP endpoints to manually trigger sandbox startup.
+ */
+export async function processNextRun(): Promise<ProcessResult> {
+  try {
+    // Find the next QUEUED BenchmarkRun
+    const run = await prisma.benchmarkRun.findFirst({
+      where: { status: 'QUEUED' },
+      include: { submission: true },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    if (!run) {
+      return { claimed: false };
+    }
+
+    // Construct payload
+    const payload: SandboxJobPayload = {
+      submissionId: run.submission.id,
+      benchmarkRunId: run.id,
+      imageId: `engine-${run.submission.id.toLowerCase()}`
+    };
+
+    // Process the run
+    return await processRun(payload);
+  } catch (err) {
+    return { 
+      claimed: false, 
+      error: `Failed to claim next run: ${String(err)}` 
+    };
+  }
+}
+
 export async function processRun(payload: SandboxJobPayload): Promise<ProcessResult> {
   // ── Retrieve records from DB ─────────────────────────────────────────────
   let benchmarkRun;
@@ -57,10 +91,10 @@ export async function processRun(payload: SandboxJobPayload): Promise<ProcessRes
     return { claimed: false, error: `Failed to find run/submission/buildJob: ${String(err)}` };
   }
 
-  // Set status to STARTING
+  // Set status to IN_PROGRESS
   await prisma.benchmarkRun.update({
     where: { id: benchmarkRun.id },
-    data: { status: 'STARTING' }
+    data: { status: 'IN_PROGRESS' }
   });
   const logger = new SandboxLogger(benchmarkRun.id);
   const logical = logicalPaths(benchmarkRun.id);

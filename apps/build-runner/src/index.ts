@@ -10,7 +10,9 @@ import { QUEUES, BuildJobPayload, SandboxJobPayload } from '@benchmark/shared-ty
 import Redis from 'ioredis';
 import { processJob } from './processor';
 
-const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+  maxRetriesPerRequest: null
+});
 const sandboxQueue = new Queue<SandboxJobPayload>(QUEUES.SANDBOX, { connection: redisConnection });
 
 const fastify = Fastify({ logger: true });
@@ -22,39 +24,61 @@ registerRoutes(fastify);
 const worker = new Worker<BuildJobPayload>(
   QUEUES.BUILD,
   async (job) => {
-    fastify.log.info(`Processing build job ${job.id}`);
-    const result = await processJob(job.data);
-    
-    if (result.status === 'SUCCESS') {
-      fastify.log.info(`Build job ${job.id} successful, enqueueing to sandbox queue`);
+    fastify.log.info({ jobId: job.id }, `Processing build job`);
+    try {
+      const result = await processJob(job.data);
       
-      const { prisma } = await import('@benchmark/db');
-      const submission = await prisma.submission.findUnique({
-        where: { id: job.data.submissionId },
-        include: { benchmarkRuns: true }
-      });
-      
-      const runId = submission?.benchmarkRuns[0]?.id;
-      if (!runId) {
-        throw new Error(`No benchmark run found for submission ${job.data.submissionId}`);
-      }
+      if (result.status === 'SUCCESS') {
+        fastify.log.info({ jobId: job.id }, `Build job successful, enqueueing to sandbox queue`);
+        
+        const { prisma } = await import('@benchmark/db');
+        const submission = await prisma.submission.findUnique({
+          where: { id: job.data.submissionId },
+          include: { benchmarkRuns: true }
+        });
+        
+        const runId = submission?.benchmarkRuns[0]?.id;
+        if (!runId) {
+          throw new Error(`No benchmark run found for submission ${job.data.submissionId}`);
+        }
 
-      const payload: SandboxJobPayload = {
-        submissionId: job.data.submissionId,
-        benchmarkRunId: runId,
-        imageId: `engine-${job.data.submissionId.toLowerCase()}`,
-      };
-      
-      await sandboxQueue.add('start-sandbox', payload);
-    } else {
-      throw new Error(`Build failed: ${result.error}`);
+        const payload: SandboxJobPayload = {
+          submissionId: job.data.submissionId,
+          benchmarkRunId: runId,
+          imageId: `engine-${job.data.submissionId.toLowerCase()}`,
+        };
+        
+        await sandboxQueue.add('start-sandbox', payload);
+      } else {
+        throw new Error(`Build failed: ${result.error}`);
+      }
+    } catch (err) {
+      fastify.log.error({ jobId: job.id, error: err }, 'Worker job handler error');
+      throw err;
     }
   },
   { connection: redisConnection, concurrency: 1 }
 );
 
+worker.on('completed', (job) => {
+  fastify.log.info({ jobId: job.id }, 'Build job completed successfully');
+});
+
 worker.on('failed', (job, err) => {
-  fastify.log.error(`Job ${job?.id} failed: ${err.message}`);
+  fastify.log.error({ jobId: job?.id, error: err.message, stack: err.stack }, 'Build job failed');
+});
+
+worker.on('error', (err) => {
+  fastify.log.error({ error: err.message, stack: err.stack }, 'Worker error');
+});
+
+// Ensure worker is running
+worker.on('ready', () => {
+  fastify.log.info({ queueName: QUEUES.BUILD }, 'Build worker ready');
+});
+
+worker.on('drained', () => {
+  fastify.log.info('Build queue drained - all jobs processed');
 });
 
 const start = async () => {
@@ -62,6 +86,7 @@ const start = async () => {
     const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3002;
     await fastify.listen({ port, host: '0.0.0.0' });
     fastify.log.info('Build runner worker listening for jobs');
+    fastify.log.info({ queueName: QUEUES.BUILD }, 'Worker subscribed to queue');
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

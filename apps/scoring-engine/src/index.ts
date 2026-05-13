@@ -7,9 +7,14 @@ import cors from '@fastify/cors';
 import axios from 'axios';
 import Redis from 'ioredis';
 import { prisma } from '@benchmark/db';
+import { Worker, Queue } from 'bullmq';
+import { QUEUES, ScoringJobPayload } from '@benchmark/shared-types';
 
 const QUESTDB_URL = process.env.QUESTDB_URL || 'http://localhost:9003';
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+  maxRetriesPerRequest: null
+});
+const leaderboardQueue = new Queue<any>(QUEUES.LEADERBOARD, { connection: redisConnection });
 
 const fastify = Fastify({ logger: true });
 fastify.register(cors, { origin: true });
@@ -292,54 +297,74 @@ fastify.get<{ Params: { submissionId: string } }>(
   }
 );
 
+// ═══════════════════════════════════════════════════════════════════
+// BullMQ Worker: Process SCORING queue jobs
+// ═══════════════════════════════════════════════════════════════════
+
+const worker = new Worker<ScoringJobPayload>(
+  QUEUES.SCORING,
+  async (job: any) => {
+    fastify.log.info({ jobId: job.id, benchmarkRunId: job.data.benchmarkRunId }, `Processing scoring job`);
+    try {
+      // Query benchmark results for this run
+      const benchmarkRun = await prisma.benchmarkRun.findUnique({
+        where: { id: job.data.benchmarkRunId },
+        include: { submission: true }
+      });
+
+      if (!benchmarkRun) {
+        throw new Error(`BenchmarkRun ${job.data.benchmarkRunId} not found`);
+      }
+
+      // TODO: Implement scoring logic here
+      // For now, mark as scored and enqueue to leaderboard
+      
+      await prisma.benchmarkRun.update({
+        where: { id: job.data.benchmarkRunId },
+        data: { status: 'SCORED' }
+      });
+
+      // Enqueue to leaderboard queue
+      await leaderboardQueue.add('update-leaderboard', {
+        submissionId: job.data.submissionId,
+        benchmarkRunId: job.data.benchmarkRunId,
+      });
+
+      return { status: 'SCORED' };
+    } catch (err) {
+      fastify.log.error({ jobId: job.id, error: err }, 'Worker job handler error');
+      throw err;
+    }
+  },
+  { connection: redisConnection, concurrency: 1 }
+);
+
+worker.on('completed', (job: any) => {
+  fastify.log.info({ jobId: job.id }, 'Scoring job completed successfully');
+});
+
+worker.on('failed', (job: any, err: any) => {
+  fastify.log.error({ jobId: job?.id, error: err.message, stack: err.stack }, 'Scoring job failed');
+});
+
+worker.on('error', (err: any) => {
+  fastify.log.error({ error: err.message, stack: err.stack }, 'Worker error');
+});
+
+worker.on('ready', () => {
+  fastify.log.info({ queueName: QUEUES.SCORING }, 'Scoring worker ready');
+});
+
+worker.on('drained', () => {
+  fastify.log.info('Scoring queue drained - all jobs processed');
+});
+
 const start = async () => {
   try {
     const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3007;
     await fastify.listen({ port, host: '0.0.0.0' });
     fastify.log.info(`Scoring engine listening on ${port}`);
-  } catch (err) {
-    fastify.log.error(err);
-    process.exit(1);
-  }
-};
-
-start();
-          correctness: correctnessMultiplier
-        }
-      });
-
-      // Update BenchmarkRun status
-      await prisma.benchmarkRun.update({
-        where: { id: runId },
-        data: {
-          status: 'EVALUATED',
-          scoreValue,
-          p95LatencyMs: metrics.p95Ms,
-          p99LatencyMs: metrics.p99Ms,
-          throughputRps: throughput,
-          evaluatedAt: new Date()
-        }
-      });
-
-      // 4. Update Redis Leaderboard
-      await redis.zadd('leaderboard:overall', scoreValue.toString(), submissionId);
-
-      return {
-        status: 'success',
-        score: scoreValue,
-        metrics
-      };
-    } catch (err: any) {
-      request.log.error(err);
-      return reply.status(500).send({ error: err.message });
-    }
-  }
-);
-
-const start = async () => {
-  try {
-    const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3007;
-    await fastify.listen({ port, host: '0.0.0.0' });
+    fastify.log.info({ queueName: QUEUES.SCORING }, 'Worker subscribed to queue');
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
