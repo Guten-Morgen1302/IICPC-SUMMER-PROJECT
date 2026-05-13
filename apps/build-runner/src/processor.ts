@@ -2,8 +2,8 @@
  * Core build job processor.
  *
  * Orchestrates the full Phase 3 build pipeline:
- *   claim → resolve artifact → init workspace → extract →
- *   validate manifest → build → write result → update DB
+ * claim → resolve artifact → init workspace → extract →
+ * validate manifest → build → write result → update DB
  *
  * Each step calls the appropriate utility module.
  * This module owns no path logic, no file I/O, and no DB queries beyond
@@ -12,7 +12,7 @@
 import fs from 'fs';
 import path from 'path';
 import { prisma } from '@benchmark/db';
-import { claimNextJob, ClaimedJob } from './claim';
+import { BuildJobPayload } from '@benchmark/shared-types';
 import { BuildLogger } from './buildLogger';
 import { validateManifest } from './manifest';
 import { extractArtifact } from './extractor';
@@ -37,19 +37,22 @@ export interface ProcessResult {
   error?: string;
 }
 
-/** Run one complete build job end-to-end */
-export async function processNextJob(): Promise<ProcessResult> {
-  // ── Claim ──────────────────────────────────────────────────────────────
-  let claimed: ClaimedJob | null;
+export async function processJob(payload: BuildJobPayload): Promise<ProcessResult> {
+  // ── Retrieve records from DB ─────────────────────────────────────────────
+  let buildJob;
+  let submission;
   try {
-    claimed = await claimNextJob();
+    buildJob = await prisma.buildJob.findUniqueOrThrow({ where: { id: payload.buildJobId } });
+    submission = await prisma.submission.findUniqueOrThrow({ where: { id: payload.submissionId } });
   } catch (err) {
-    return { claimed: false, error: `Failed to claim job: ${String(err)}` };
+    return { claimed: false, error: `Failed to find job/submission: ${String(err)}` };
   }
 
-  if (!claimed) return { claimed: false };
-
-  const { buildJob, submission } = claimed;
+  // Set status to IN_PROGRESS
+  await prisma.buildJob.update({
+    where: { id: buildJob.id },
+    data: { status: 'IN_PROGRESS', startedAt: new Date() }
+  });
   const logger = new BuildLogger(buildJob.id);
   const logical = logicalPaths(buildJob.id);
   const startedAt = new Date().toISOString();
@@ -235,11 +238,27 @@ export async function processNextJob(): Promise<ProcessResult> {
     }
   });
 
-  // Mark parent Submission as BUILDING (Phase 4 will advance it further)
+  // Mark parent Submission as BUILDING (build + deploy phase complete)
   await prisma.submission.update({
     where: { id: submission.id },
     data: { status: 'BUILDING' }
   });
 
+  // Emit final pipeline event
+  await emitPipelineEvent(
+    {
+      submissionId: submission.id,
+      status: 'DEPLOYED',
+      timestamp: completedAt,
+      message: 'Build and container deployment complete — ready for benchmarking'
+    },
+    logger
+  );
+
   return { claimed: true, buildJobId: buildJob.id, status: 'SUCCESS' };
 }
+Phase 4 will advance it further)
+  await prisma.submission.update({
+    where: { id: submission.id },
+    data: { status: 'BUILDING' }
+  }

@@ -7,6 +7,12 @@ import multipart from '@fastify/multipart';
 import { prisma } from '@benchmark/db';
 import Fastify from 'fastify';
 import { storeSubmissionArtifact } from './storage';
+import { Queue } from 'bullmq';
+import { QUEUES, BuildJobPayload } from '@benchmark/shared-types';
+import Redis from 'ioredis';
+
+const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+const buildQueue = new Queue<BuildJobPayload>(QUEUES.BUILD, { connection: redisConnection });
 
 const fastify = Fastify({ logger: true });
 
@@ -44,18 +50,18 @@ fastify.get('/health', async (_request, _reply) => {
  * POST /submit
  *
  * Accepts multipart/form-data with:
- *   - userEmail  (field)  temporary identity token for hackathon phase
- *   - file       (file)   the trading engine archive (.zip / .tar.gz)
+ * - userEmail (field) temporary identity token for hackathon phase
+ * - file (file) the trading engine archive (.zip / .tar.gz)
  *
  * Flow:
- *   1. Parse + validate multipart upload
- *   2. Validate and normalize userEmail
- *   3. Persist artifact to storage abstraction
- *   4. Create / resolve User row
- *   5. Create Submission with artifact metadata
- *   6. Create linked BuildJob  (QUEUED)
- *   7. Create linked BenchmarkRun (QUEUED)
- *   8. Return submissionId and job statuses
+ * 1. Parse + validate multipart upload
+ * 2. Validate and normalize userEmail
+ * 3. Persist artifact to storage abstraction
+ * 4. Create / resolve User row
+ * 5. Create Submission with artifact metadata
+ * 6. Create linked BuildJob (QUEUED)
+ * 7. Create linked BenchmarkRun (QUEUED)
+ * 8. Return submissionId and job statuses
  *
  * NOTE(future): userEmail will be replaced by a real auth token in a later phase.
  */
@@ -182,7 +188,21 @@ fastify.post('/submit', async (request, reply) => {
     // Non-fatal: submission record exists and file is saved; metadata patch can be retried.
   }
 
-  // ── 8. Respond ────────────────────────────────────────────────────────
+  // ── 8. Enqueue Build Job ──────────────────────────────────────────────
+  try {
+    if (artifact && artifact.storedPath) {
+      const payload: BuildJobPayload = {
+        submissionId: submission.id,
+        buildJobId: submission.buildJobs[0].id,
+        storedPath: artifact.storedPath,
+      };
+      await buildQueue.add('build-image', payload);
+    }
+  } catch (err) {
+    fastify.log.error(err, 'Failed to enqueue build job');
+  }
+
+  // ── 9. Respond ────────────────────────────────────────────────────────
   return reply.status(201).send({
     submissionId: submission.id,
     userId: user.id,
@@ -286,150 +306,7 @@ fastify.get<{ Params: { id: string } }>('/runs/:id', async (request, reply) => {
     include: { 
       submission: { include: { user: true } },
       score: true
-    }
-  });
-
-  if (!run) return reply.status(404).send({ error: 'Run not found' });
-  
-  return {
-    ...run,
-    submission: {
-      ...run.submission,
-      sizeBytes: run.submission.sizeBytes?.toString()
-    }
-  };
-});
-
-// ── Orchestrator Stub ───────────────────────────────────────────────────
-
-const pipelines: Record<string, any> = {};
-
-fastify.post('/orchestrator/run', async (request, reply) => {
-  const { submissionId, userEmail, scenario } = request.body as any;
-  
-  pipelines[submissionId] = {
-    submissionId,
-    userEmail,
-    scenario,
-    status: 'RUNNING',
-    steps: [
-      { name: 'SUBMISSION_RECEIVED', status: 'DONE', message: 'Engine package ingested', startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), data: {} },
-      { name: 'BUILDING_IMAGE', status: 'IN_PROGRESS', message: 'Compiling specialized trading environment...', startedAt: new Date().toISOString(), completedAt: null, data: {} },
-      { name: 'STARTING_SANDBOX', status: 'PENDING', message: '', startedAt: null, completedAt: null, data: {} },
-      { name: 'RUNNING_BENCHMARK', status: 'PENDING', message: '', startedAt: null, completedAt: null, data: {} },
-      { name: 'EVALUATING_CORRECTNESS', status: 'PENDING', message: '', startedAt: null, completedAt: null, data: {} },
-      { name: 'COMPUTING_SCORE', status: 'PENDING', message: '', startedAt: null, completedAt: null, data: {} },
-      { name: 'LEADERBOARD_UPDATED', status: 'PENDING', message: '', startedAt: null, completedAt: null, data: {} },
-      { name: 'COMPLETE', status: 'PENDING', message: '', startedAt: null, completedAt: null, data: {} }
-    ],
-    createdAt: new Date().toISOString(),
-    explanation: 'System is currently processing the build phase.'
-  };
-
-  // Simulate full progress lifecycle for demo
-  const sequence = [
-    { step: 1, delay: 2000, msg: 'DONE', detail: 'Build successful. Image tagged.' },
-    { step: 2, delay: 4000, msg: 'DONE', detail: 'Isolated sandbox ready on node-04.' },
-    { step: 3, delay: 7000, msg: 'DONE', detail: 'Benchmark traffic generation complete (1M ops).' },
-    { step: 4, delay: 10000, msg: 'DONE', detail: 'Correctness audit passed (100% compliance).' },
-    { step: 5, delay: 12000, msg: 'DONE', detail: 'Score calculated: 842.5.' },
-    { step: 6, delay: 14000, msg: 'DONE', detail: 'Leaderboard standings recalculated.' },
-    { step: 7, delay: 15000, msg: 'DONE', detail: 'Pipeline lifecycle complete.' }
-  ];
-
-  sequence.forEach(({ step, delay, msg, detail }) => {
-    setTimeout(async () => {
-      if (pipelines[submissionId]) {
-        const p = pipelines[submissionId];
-        p.steps[step].status = msg as any;
-        p.steps[step].message = detail;
-        p.steps[step].completedAt = new Date().toISOString();
-        
-        // Update DB for specific steps
-        if (step === 1) { // BUILDING_IMAGE
-          await prisma.submission.update({ where: { id: submissionId }, data: { status: 'BUILDING' } }).catch(() => {});
-        }
-        
-        if (step === 2) { // STARTING_SANDBOX
-          await prisma.submission.update({ where: { id: submissionId }, data: { status: 'RUNNING' } }).catch(() => {});
-        }
-
-        if (step === 5) { // COMPUTING_SCORE
-          const scoreValue = 842.5;
-          const sub = await prisma.submission.findUnique({ where: { id: submissionId }, include: { benchmarkRuns: true } });
-          const runId = sub?.benchmarkRuns[0]?.id;
-          
-          if (runId) {
-            await prisma.benchmarkRun.update({
-              where: { id: runId },
-              data: {
-                status: 'EVALUATED',
-                scoreValue,
-                p95LatencyMs: 1.2,
-                p99LatencyMs: 2.4,
-                throughputRps: 12500,
-                correctnessStatus: 'PASS',
-                evaluatedAt: new Date()
-              }
-            }).catch(() => {});
-
-            await prisma.score.upsert({
-              where: { benchmarkRunId: runId },
-              update: { totalScore: scoreValue, latency: 1.2, throughput: 12500, correctness: 1.0 },
-              create: { benchmarkRunId: runId, totalScore: scoreValue, rawScore: scoreValue, latencyScore: 85, throughputScore: 90, errorRateScore: 100, correctnessMultiplier: 1.0, latency: 1.2, throughput: 12500, correctness: 1.0 }
-            }).catch(() => {});
-
-            // Update Redis for Leaderboard
-            const Redis = (await import('ioredis')).default;
-            const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-            await redis.zadd('leaderboard:overall', scoreValue.toString(), submissionId);
-            await redis.quit();
-          }
-        }
-
-        if (step === 7) { // COMPLETE
-          await prisma.submission.update({ where: { id: submissionId }, data: { status: 'COMPLETED' } }).catch(() => {});
-          p.status = 'COMPLETED';
-        } else {
-          p.steps[step + 1].status = 'IN_PROGRESS';
-          p.steps[step + 1].startedAt = new Date().toISOString();
-        }
-      }
-    }, delay);
-  });
-
-  return { status: 'scheduled' };
-});
-
-fastify.get('/orchestrator/status/:submissionId', async (request, reply) => {
-  const { submissionId } = request.params as any;
-  let pipe = pipelines[submissionId];
-  
-  if (!pipe) {
-    // Reconstruct from DB for the demo
-    const submission = await prisma.submission.findUnique({
-      where: { id: submissionId },
-      include: { user: true }
-    });
-    
-    if (!submission) return reply.status(404).send({ error: 'Pipeline not found' });
-    
-    // Create a "Completed" state if it's an old submission
-    pipe = {
-      submissionId,
-      userEmail: submission.user.email,
-      scenario: 'smoke',
-      status: 'COMPLETE',
-      steps: [
-        { name: 'SUBMISSION_RECEIVED', status: 'DONE', message: 'Engine package ingested', startedAt: submission.createdAt, completedAt: submission.createdAt, data: {} },
-        { name: 'BUILDING_IMAGE', status: 'DONE', message: 'Compiling specialized trading environment...', startedAt: submission.createdAt, completedAt: submission.createdAt, data: {} },
-        { name: 'STARTING_SANDBOX', status: 'DONE', message: 'Isolated sandbox ready.', startedAt: submission.createdAt, completedAt: submission.createdAt, data: {} },
-        { name: 'RUNNING_BENCHMARK', status: 'DONE', message: 'Traffic generation complete.', startedAt: submission.createdAt, completedAt: submission.createdAt, data: {} },
-        { name: 'EVALUATING_CORRECTNESS', status: 'DONE', message: 'Audit passed.', startedAt: submission.createdAt, completedAt: submission.createdAt, data: {} },
-        { name: 'COMPUTING_SCORE', status: 'DONE', message: 'Score computed.', startedAt: submission.createdAt, completedAt: submission.createdAt, data: {} },
-        { name: 'LEADERBOARD_UPDATED', status: 'DONE', message: 'Rankings updated.', startedAt: submission.createdAt, completedAt: submission.createdAt, data: {} },
-        { name: 'COMPLETE', status: 'DONE', message: 'Pipeline lifecycle complete.', startedAt: submission.createdAt, completedAt: submission.createdAt, data: {} }
-      ],
+    }],
       createdAt: submission.createdAt,
       explanation: 'Analysis complete. Final report generated.'
     };

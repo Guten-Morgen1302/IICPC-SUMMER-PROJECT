@@ -48,3 +48,33 @@ export const PipelineStatusSchema = z.enum([
   'COMPLETED'
 ]);
 export type PipelineStatus = z.infer<typeof PipelineStatusSchema>;
+
+// Queue Names
+export const QUEUES = {
+  BUILD: 'build-queue',
+  SANDBOX: 'sandbox-queue',
+  BENCHMARK: 'benchmark-queue',
+  CORRECTNESS: 'correctness-queue',
+};
+
+// Job Payloads
+export const BuildJobPayloadSchema = z.object({
+  submissionId: z.string(),
+  buildJobId: z.string(),
+  storedPath: z.string(),
+});
+export type BuildJobPayload = z.infer<typeof BuildJobPayloadSchema>;
+
+export const SandboxJobPayloadSchema = z.object({
+  submissionId: z.string(),
+  benchmarkRunId: z.string(),
+  imageId: z.string(),
+});
+export type SandboxJobPayload = z.infer<typeof SandboxJobPayloadSchema>;
+
+export const BenchmarkJobPayloadSchema = z.object({
+  submissionId: z.string(),
+  benchmarkRunId: z.string(),
+  sandboxUrl: z.string(),
+});
+export type BenchmarkJobPayload = z.infer<typeof BenchmarkJobPayloadSchema>;

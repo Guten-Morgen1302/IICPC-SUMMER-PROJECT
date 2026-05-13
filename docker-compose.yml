@@ -79,6 +79,8 @@ services:
       - "3002:3002"
     environment:
       - PORT=3002
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   sandbox-manager:
     build: 
@@ -90,6 +92,11 @@ services:
       - "3003:3003"
     environment:
       - PORT=3003
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - default
+      - contestant-net
 
   load-generator-controller:
     build: 
@@ -101,6 +108,9 @@ services:
       - "3004:3004"
     environment:
       - PORT=3004
+    networks:
+      - default
+      - contestant-net
 
   telemetry-ingestor:
     build: 
@@ -154,3 +164,12 @@ volumes:
   postgres_data:
   redis_data:
   questdb_data:
+
+networks:
+  contestant-net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-contestant
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

@@ -2,14 +2,14 @@
  * Core sandbox lifecycle processor.
  *
  * Orchestrates:
- *   claim → resolve runtime contract → init workspace → launch container →
- *   readiness check → update DB → (sandbox is now READY for Phase 5 traffic)
+ * claim → resolve runtime contract → init workspace → launch container →
+ * readiness check → update DB → (sandbox is now READY for Phase 5 traffic)
  *
  * Also provides stop/cleanup flow.
  */
 import fs from 'fs';
 import { prisma } from '@benchmark/db';
-import { claimNextRun, ClaimedRun } from './claim';
+import { SandboxJobPayload } from '@benchmark/shared-types';
 import { SandboxLogger } from './sandboxLogger';
 import {
   launchSandbox,
@@ -40,18 +40,28 @@ export interface ProcessResult {
   containerId?: string;
 }
 
-export async function processNextRun(): Promise<ProcessResult> {
-  // ── Claim ──────────────────────────────────────────────────────────────
-  let claimed: ClaimedRun | null;
+export async function processRun(payload: SandboxJobPayload): Promise<ProcessResult> {
+  // ── Retrieve records from DB ─────────────────────────────────────────────
+  let benchmarkRun;
+  let submission;
+  let buildJob;
   try {
-    claimed = await claimNextRun();
+    benchmarkRun = await prisma.benchmarkRun.findUniqueOrThrow({ where: { id: payload.benchmarkRunId } });
+    submission = await prisma.submission.findUniqueOrThrow({ where: { id: payload.submissionId } });
+    // Get the SUCCESSFUL build job for this submission
+    buildJob = await prisma.buildJob.findFirstOrThrow({
+      where: { submissionId: payload.submissionId, status: 'SUCCESS' },
+      orderBy: { completedAt: 'desc' }
+    });
   } catch (err) {
-    return { claimed: false, error: `Failed to claim run: ${String(err)}` };
+    return { claimed: false, error: `Failed to find run/submission/buildJob: ${String(err)}` };
   }
 
-  if (!claimed) return { claimed: false };
-
-  const { benchmarkRun, submission, buildJob } = claimed;
+  // Set status to STARTING
+  await prisma.benchmarkRun.update({
+    where: { id: benchmarkRun.id },
+    data: { status: 'STARTING' }
+  });
   const logger = new SandboxLogger(benchmarkRun.id);
   const logical = logicalPaths(benchmarkRun.id);
   const startedAt = new Date().toISOString();
