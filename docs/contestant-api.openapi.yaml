@@ -1,0 +1,195 @@
+openapi: 3.0.3
+info:
+  title: IICPC Arena Contestant Engine Contract
+  version: 0.1.0
+  description: >
+    Required HTTP contract for contestant-submitted order book or matching
+    engine services hosted by the benchmark arena.
+servers:
+  - url: http://127.0.0.1:{port}
+    variables:
+      port:
+        default: "8000"
+paths:
+  /health:
+    get:
+      summary: Readiness probe
+      responses:
+        "200":
+          description: Engine is ready to receive benchmark traffic.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /orders:
+    post:
+      summary: Submit a new order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderRequest"
+      responses:
+        "200":
+          description: Order accepted, rejected, or filled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionReport"
+        "400":
+          description: Invalid order request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /cancel:
+    post:
+      summary: Cancel an active order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelRequest"
+      responses:
+        "200":
+          description: Cancellation result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionReport"
+        "404":
+          description: Order was not found or is no longer cancellable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /orderbook:
+    get:
+      summary: Return a top-of-book snapshot
+      responses:
+        "200":
+          description: Current order book snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderBookSnapshot"
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    OrderRequest:
+      type: object
+      required: [orderId, clientId, side, type, quantity, timestamp]
+      properties:
+        orderId:
+          type: string
+        clientId:
+          type: string
+        side:
+          type: string
+          enum: [BUY, SELL]
+        type:
+          type: string
+          enum: [LIMIT, MARKET]
+        price:
+          type: number
+          description: Required for LIMIT orders. Ignored for MARKET orders.
+        quantity:
+          type: number
+          minimum: 1
+        timestamp:
+          type: integer
+          format: int64
+          description: Client send timestamp in nanoseconds.
+    CancelRequest:
+      type: object
+      required: [orderId, clientId, timestamp]
+      properties:
+        orderId:
+          type: string
+        clientId:
+          type: string
+        timestamp:
+          type: integer
+          format: int64
+          description: Client send timestamp in nanoseconds.
+    ExecutionReport:
+      type: object
+      required: [orderId, status, filledQuantity, remainingQuantity, timestamp]
+      properties:
+        orderId:
+          type: string
+        status:
+          type: string
+          enum: [ACK, PARTIAL_FILL, FILL, REJECTED, CANCELLED]
+        filledQuantity:
+          type: number
+          minimum: 0
+        remainingQuantity:
+          type: number
+          minimum: 0
+        price:
+          type: number
+          nullable: true
+        timestamp:
+          type: integer
+          format: int64
+          description: Engine response timestamp in nanoseconds.
+        fills:
+          type: array
+          items:
+            $ref: "#/components/schemas/Fill"
+        reason:
+          type: string
+    Fill:
+      type: object
+      required: [orderId, matchedOrderId, fillPrice, fillQuantity, fillTimestamp]
+      properties:
+        orderId:
+          type: string
+        matchedOrderId:
+          type: string
+        fillPrice:
+          type: number
+        fillQuantity:
+          type: number
+          minimum: 1
+        fillTimestamp:
+          type: integer
+          format: int64
+    OrderBookSnapshot:
+      type: object
+      required: [bids, asks, timestamp]
+      properties:
+        bids:
+          type: array
+          items:
+            $ref: "#/components/schemas/BookLevel"
+        asks:
+          type: array
+          items:
+            $ref: "#/components/schemas/BookLevel"
+        timestamp:
+          type: integer
+          format: int64
+    BookLevel:
+      type: object
+      required: [price, quantity]
+      properties:
+        price:
+          type: number
+        quantity:
+          type: number
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string

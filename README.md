@@ -137,6 +137,13 @@ The UI is built for "nanosecond warfare" visibility:
 - **/pipeline/:id**: Real-time visualization of the build/sandbox/benchmark lifecycle.
 - **/upload**: Submit new engines with manifest validation.
 
+## Contestant Engine Contract
+Contestant services must expose `/health`, `/orders`, `/cancel`, and `/orderbook`.
+The exact request/response schema is documented in
+[`docs/contestant-api.openapi.yaml`](docs/contestant-api.openapi.yaml). The local
+benchmark engine currently targets the short paths (`/orders`, `/cancel`,
+`/orderbook`) defined there.
+
 ## Getting Started
 
 ### 1. Bootstrap Infrastructure

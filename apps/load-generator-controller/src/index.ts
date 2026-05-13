@@ -8,7 +8,7 @@ import { registerRoutes } from './routes';
 import { Worker, Queue } from 'bullmq';
 import { QUEUES, BenchmarkJobPayload, CorrectnessJobPayload } from '@benchmark/shared-types';
 import Redis from 'ioredis';
-import { processNextBenchmark } from './processor';
+import { runBenchmarkById } from './processor';
 
 const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
   maxRetriesPerRequest: null
@@ -30,7 +30,7 @@ const worker = new Worker<BenchmarkJobPayload>(
   async (job) => {
     fastify.log.info({ jobId: job.id, submissionId: job.data.submissionId }, `Processing benchmark job`);
     try {
-      const result = await processNextBenchmark(undefined);
+      const result = await runBenchmarkById(job.data.benchmarkRunId);
       
       if (result.claimed && result.status === 'SUCCESS') {
         fastify.log.info({ jobId: job.id }, `Benchmark complete, enqueueing to correctness queue`);

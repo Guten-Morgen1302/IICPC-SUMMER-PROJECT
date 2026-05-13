@@ -12,6 +12,7 @@ import { QUEUES, LeaderboardJobPayload } from '@benchmark/shared-types';
 const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
   maxRetriesPerRequest: null
 });
+const redis = redisConnection;
 const fastify = Fastify({ logger: true });
 
 fastify.register(cors, { origin: true });
@@ -30,7 +31,10 @@ fastify.get('/overview', async () => {
     prisma.benchmarkRun.count({ where: { status: 'EVALUATED' } })
   ]);
 
-  const topScore = await redis.zrevrange('leaderboard:overall', 0, 0, 'WITHSCORES');
+  const [topScore, rankedEntries] = await Promise.all([
+    redis.zrevrange('leaderboard:overall', 0, 0, 'WITHSCORES'),
+    redis.zcard('leaderboard:overall')
+  ]);
   
   return {
     totalSubmissions,
@@ -38,9 +42,9 @@ fastify.get('/overview', async () => {
     benchmarkedRuns,
     evaluatedRuns,
     topScore: topScore[1] ? parseFloat(topScore[1]) : 0,
-    buildsSucceeded: totalSubmissions, // placeholder
-    buildsFailed: 0,
-    rankedEntries: totalSubmissions
+    buildsSucceeded: await prisma.buildJob.count({ where: { status: 'SUCCESS' } }),
+    buildsFailed: await prisma.buildJob.count({ where: { status: 'FAILED' } }),
+    rankedEntries
   };
 });
 
@@ -136,12 +140,26 @@ const worker = new Worker<LeaderboardJobPayload>(
         throw new Error(`BenchmarkRun ${job.data.benchmarkRunId} not found`);
       }
 
-      // TODO: Implement leaderboard update logic
-      // For now, mark run as complete and update submission status
-      
+      const score = await prisma.score.findUnique({
+        where: { benchmarkRunId: job.data.benchmarkRunId }
+      });
+
+      if (!score) {
+        throw new Error(`Score for BenchmarkRun ${job.data.benchmarkRunId} not found`);
+      }
+
+      await redis.zadd('leaderboard:overall', score.totalScore, job.data.submissionId);
+      await redis.zadd('leaderboard:latency', score.latency, job.data.submissionId);
+      await redis.zadd('leaderboard:throughput', score.throughput, job.data.submissionId);
+
       await prisma.benchmarkRun.update({
         where: { id: job.data.benchmarkRunId },
-        data: { status: 'COMPLETED' }
+        data: {
+          status: 'EVALUATED',
+          scoreValue: score.totalScore,
+          rankingEligible: score.correctnessMultiplier > 0,
+          evaluatedAt: new Date()
+        }
       });
 
       await prisma.submission.update({
@@ -149,7 +167,7 @@ const worker = new Worker<LeaderboardJobPayload>(
         data: { status: 'COMPLETED' }
       });
 
-      return { status: 'UPDATED' };
+      return { status: 'UPDATED', score: score.totalScore };
     } catch (err) {
       fastify.log.error({ jobId: job.id, error: err }, 'Worker job handler error');
       throw err;

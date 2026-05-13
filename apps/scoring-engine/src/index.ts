@@ -14,6 +14,7 @@ const QUESTDB_URL = process.env.QUESTDB_URL || 'http://localhost:9003';
 const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
   maxRetriesPerRequest: null
 });
+const redis = redisConnection;
 const leaderboardQueue = new Queue<any>(QUEUES.LEADERBOARD, { connection: redisConnection });
 
 const fastify = Fastify({ logger: true });
@@ -84,6 +85,93 @@ function computeCompositeScore(
     (WEIGHTS.correctness * correctnessScore);
 
   return Math.round(composite * 1000) / 1000; // Round to 3 decimals
+}
+
+function computeScoreBreakdown(p99Ms: number, throughput: number, correctnessRatio: number) {
+  const latencyScore = normalizeLatencyScore(p99Ms);
+  const throughputScore = normalizeThroughputScore(throughput);
+  const correctnessScore = Math.max(0, Math.min(1, correctnessRatio));
+  const totalScore = computeCompositeScore(latencyScore, throughputScore, correctnessScore);
+
+  return {
+    latencyScore,
+    throughputScore,
+    correctnessScore,
+    totalScore
+  };
+}
+
+async function persistScore(input: {
+  runId: string;
+  submissionId: string;
+  p99Ms: number;
+  throughput: number;
+  correctnessRatio: number;
+  requestCount?: number | null;
+  successCount?: number | null;
+}) {
+  const breakdown = computeScoreBreakdown(
+    input.p99Ms,
+    input.throughput,
+    input.correctnessRatio
+  );
+
+  const errorRateScore = input.requestCount && input.requestCount > 0
+    ? Math.max(0, Math.min(1, (input.successCount ?? 0) / input.requestCount))
+    : 1.0;
+
+  const score = await prisma.score.upsert({
+    where: { benchmarkRunId: input.runId },
+    update: {
+      totalScore: breakdown.totalScore,
+      latencyScore: breakdown.latencyScore,
+      throughputScore: breakdown.throughputScore,
+      errorRateScore,
+      correctnessMultiplier: breakdown.correctnessScore,
+      latency: input.p99Ms,
+      throughput: Math.round(input.throughput),
+      correctness: breakdown.correctnessScore,
+      rawScore: breakdown.totalScore
+    },
+    create: {
+      benchmarkRunId: input.runId,
+      totalScore: breakdown.totalScore,
+      rawScore: breakdown.totalScore,
+      latencyScore: breakdown.latencyScore,
+      throughputScore: breakdown.throughputScore,
+      errorRateScore,
+      correctnessMultiplier: breakdown.correctnessScore,
+      latency: input.p99Ms,
+      throughput: Math.round(input.throughput),
+      correctness: breakdown.correctnessScore
+    }
+  });
+
+  await prisma.benchmarkRun.update({
+    where: { id: input.runId },
+    data: {
+      status: 'EVALUATED',
+      scoreValue: breakdown.totalScore,
+      rankingEligible: breakdown.correctnessScore >= THRESHOLDS.correctnessGate,
+      evaluatedAt: new Date()
+    }
+  });
+
+  await redis.zadd('leaderboard:overall', breakdown.totalScore, input.submissionId);
+  await redis.zadd('leaderboard:latency', input.p99Ms, input.submissionId);
+  await redis.zadd('leaderboard:throughput', input.throughput, input.submissionId);
+
+  await redis.publish('score-updates', JSON.stringify({
+    submissionId: input.submissionId,
+    runId: input.runId,
+    totalScore: breakdown.totalScore,
+    latencyScore: breakdown.latencyScore,
+    throughputScore: breakdown.throughputScore,
+    correctnessScore: breakdown.correctnessScore,
+    timestamp: Date.now()
+  }));
+
+  return score;
 }
 
 /**
@@ -316,12 +404,25 @@ const worker = new Worker<ScoringJobPayload>(
         throw new Error(`BenchmarkRun ${job.data.benchmarkRunId} not found`);
       }
 
-      // TODO: Implement scoring logic here
-      // For now, mark as scored and enqueue to leaderboard
-      
-      await prisma.benchmarkRun.update({
-        where: { id: job.data.benchmarkRunId },
-        data: { status: 'SCORED' }
+      const correctnessReport = await prisma.correctnessReport.findUnique({
+        where: { benchmarkRunId: job.data.benchmarkRunId }
+      });
+
+      const p99Ms = benchmarkRun.p99LatencyMs ?? benchmarkRun.avgLatencyMs;
+      const throughput = benchmarkRun.throughputRps;
+
+      if (p99Ms == null || throughput == null) {
+        throw new Error(`BenchmarkRun ${job.data.benchmarkRunId} has no benchmark summary metrics`);
+      }
+
+      const score = await persistScore({
+        runId: job.data.benchmarkRunId,
+        submissionId: job.data.submissionId,
+        p99Ms,
+        throughput,
+        correctnessRatio: correctnessReport?.correctnessRatio ?? 1.0,
+        requestCount: benchmarkRun.requestCount,
+        successCount: benchmarkRun.successCount
       });
 
       // Enqueue to leaderboard queue
@@ -330,7 +431,7 @@ const worker = new Worker<ScoringJobPayload>(
         benchmarkRunId: job.data.benchmarkRunId,
       });
 
-      return { status: 'SCORED' };
+      return { status: 'EVALUATED', score: score.totalScore };
     } catch (err) {
       fastify.log.error({ jobId: job.id, error: err }, 'Worker job handler error');
       throw err;
