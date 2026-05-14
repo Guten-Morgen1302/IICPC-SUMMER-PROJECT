@@ -303,47 +303,4 @@ const start = async () => {
   }
 };
 
-start();
-          correctness: correctnessMultiplier
-        }
-      });
 
-      // Update BenchmarkRun status
-      await prisma.benchmarkRun.update({
-        where: { id: runId },
-        data: {
-          status: 'EVALUATED',
-          scoreValue,
-          p95LatencyMs: metrics.p95Ms,
-          p99LatencyMs: metrics.p99Ms,
-          throughputRps: throughput,
-          evaluatedAt: new Date()
-        }
-      });
-
-      // 4. Update Redis Leaderboard
-      await redis.zadd('leaderboard:overall', scoreValue.toString(), submissionId);
-
-      return {
-        status: 'success',
-        score: scoreValue,
-        metrics
-      };
-    } catch (err: any) {
-      request.log.error(err);
-      return reply.status(500).send({ error: err.message });
-    }
-  }
-);
-
-const start = async () => {
-  try {
-    const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3007;
-    await fastify.listen({ port, host: '0.0.0.0' });
-  } catch (err) {
-    fastify.log.error(err);
-    process.exit(1);
-  }
-};
-
-start();

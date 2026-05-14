@@ -306,14 +306,10 @@ fastify.get<{ Params: { id: string } }>('/runs/:id', async (request, reply) => {
     include: { 
       submission: { include: { user: true } },
       score: true
-    }],
-      createdAt: submission.createdAt,
-      explanation: 'Analysis complete. Final report generated.'
-    };
-    pipelines[submissionId] = pipe;
-  }
+    }
+  });
   
-  return pipe;
+  return run;
 });
 
 fastify.get('/orchestrator/pipelines', async () => {
