@@ -6,6 +6,10 @@ export type OrderSide = z.infer<typeof OrderSideSchema>;
 export const OrderTypeSchema = z.enum(['LIMIT', 'MARKET']);
 export type OrderType = z.infer<typeof OrderTypeSchema>;
 
+// STEAL 3: Add TimeInForce types for IOC and FOK orders
+export const TimeInForceSchema = z.enum(['GTC', 'IOC', 'FOK']);
+export type TimeInForce = z.infer<typeof TimeInForceSchema>;
+
 export const OrderRequestSchema = z.object({
   orderId: z.string(),
   userId: z.string(),
@@ -14,6 +18,7 @@ export const OrderRequestSchema = z.object({
   price: z.number(),
   quantity: z.number(),
   timestamp: z.number(), // Unix timestamp in nanoseconds
+  tif: TimeInForceSchema.optional().default('GTC'), // Time in force: GTC (Good Till Cancel), IOC (Immediate or Cancel), FOK (Fill or Kill)
 });
 
 export type OrderRequest = z.infer<typeof OrderRequestSchema>;

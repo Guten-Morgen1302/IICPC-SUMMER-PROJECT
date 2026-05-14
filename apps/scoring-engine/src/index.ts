@@ -64,14 +64,39 @@ function normalizeThroughputScore(tps: number): number {
 }
 
 /**
- * Compute composite score
+ * Detect market regime from toxicity score
+ * toxicity = aggressive_market_orders / total_limit_orders
+ * calm: < 0.2, normal: 0.2-0.5, stressed: >= 0.5
+ */
+function detectRegime(toxicityScore: number): 'calm' | 'normal' | 'stressed' {
+  if (toxicityScore < 0.2) return 'calm';
+  if (toxicityScore < 0.5) return 'normal';
+  return 'stressed';
+}
+
+/**
+ * Compute regime bonus multiplier
+ * Rewards engines that maintain correctness under high toxicity
+ */
+function getRegimeBonus(regime: 'calm' | 'normal' | 'stressed'): number {
+  const bonuses = {
+    calm: 1.0,    // Baseline
+    normal: 1.15, // 15% bonus for surviving normal market
+    stressed: 1.35 // 35% bonus for surviving adversarial market
+  };
+  return bonuses[regime];
+}
+
+/**
+ * Compute composite score with regime bonus
  * If correctness < gate, score = 0 (gating rule)
- * Otherwise: score = w_l * l_score + w_t * t_score + w_c * c_score
+ * Otherwise: (w_l * l_score + w_t * t_score + w_c * c_score) * regime_bonus
  */
 function computeCompositeScore(
   latencyScore: number,
   throughputScore: number,
-  correctnessScore: number
+  correctnessScore: number,
+  regimeBonus: number = 1.0
 ): number {
   // Gating rule: if correctness below threshold, return 0
   if (correctnessScore < THRESHOLDS.correctnessGate) {
@@ -84,19 +109,39 @@ function computeCompositeScore(
     (WEIGHTS.throughput * throughputScore) +
     (WEIGHTS.correctness * correctnessScore);
 
-  return Math.round(composite * 1000) / 1000; // Round to 3 decimals
+  // Apply regime bonus
+  const bonusedScore = composite * regimeBonus;
+  return Math.round(bonusedScore * 1000) / 1000; // Round to 3 decimals
 }
 
-function computeScoreBreakdown(p99Ms: number, throughput: number, correctnessRatio: number) {
+function computeScoreBreakdown(
+  p99Ms: number,
+  throughput: number,
+  correctnessRatio: number,
+  toxicityScore: number = 0.3
+) {
   const latencyScore = normalizeLatencyScore(p99Ms);
   const throughputScore = normalizeThroughputScore(throughput);
   const correctnessScore = Math.max(0, Math.min(1, correctnessRatio));
-  const totalScore = computeCompositeScore(latencyScore, throughputScore, correctnessScore);
+  
+  // Detect regime from toxicity
+  const regime = detectRegime(toxicityScore);
+  const regimeBonus = getRegimeBonus(regime);
+  
+  const totalScore = computeCompositeScore(
+    latencyScore,
+    throughputScore,
+    correctnessScore,
+    regimeBonus
+  );
 
   return {
     latencyScore,
     throughputScore,
     correctnessScore,
+    toxicityScore,
+    regime,
+    regimeBonus,
     totalScore
   };
 }
@@ -107,13 +152,15 @@ async function persistScore(input: {
   p99Ms: number;
   throughput: number;
   correctnessRatio: number;
+  toxicityScore?: number;
   requestCount?: number | null;
   successCount?: number | null;
 }) {
   const breakdown = computeScoreBreakdown(
     input.p99Ms,
     input.throughput,
-    input.correctnessRatio
+    input.correctnessRatio,
+    input.toxicityScore ?? 0.3
   );
 
   const errorRateScore = input.requestCount && input.requestCount > 0

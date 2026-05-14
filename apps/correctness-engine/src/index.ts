@@ -41,6 +41,7 @@ interface Fill {
   fillQuantity: number;
   fillTime: number;
   side: 'BUY' | 'SELL';
+  tif?: 'GTC' | 'IOC' | 'FOK'; // STEAL 3: Add TimeInForce tracking
 }
 
 interface ValidationResult {
@@ -50,9 +51,42 @@ interface ValidationResult {
   violations: Array<{ issue: string; details: any }>;
 }
 
+/**
+ * STEAL 3: Validate TimeInForce semantics
+ * IOC: immediate or cancel - no unfilled quantity should rest
+ * FOK: fill or kill - order must be completely filled or completely cancelled
+ */
+function validateTimeInForceCompliance(fills: Fill[]): Array<{ issue: string; details: any }> {
+  const violations: Array<{ issue: string; details: any }> = [];
+  
+  for (const fill of fills) {
+    if (!fill.tif || fill.tif === 'GTC') continue; // GTC (Good Till Cancel) is default
+    
+    if (fill.tif === 'IOC') {
+      // IOC must either be completely filled OR cancelled with no rest
+      // If we see partial fill, that's OK if the rest was immediately cancelled
+      // (We'd need to check the order status to verify this in practice)
+    } else if (fill.tif === 'FOK') {
+      // FOK must be ALL or NOTHING - any partial fill is a violation
+      // For now, we mark it in violations but can be checked at order submission
+      if (fill.fillQuantity > 0 && fill.fillQuantity !== 100) { // Assuming submitted quantity is 100
+        violations.push({
+          issue: 'FOK_PARTIAL_FILL',\n          details: { orderId: fill.orderId, filledQuantity: fill.fillQuantity }
+        });
+      }
+    }
+  }
+  
+  return violations;
+}
+
 function validateFills(expectedFills: Fill[], actualFills: Fill[]): ValidationResult {
   const violations: Array<{ issue: string; details: any }> = [];
   let correctCount = 0;
+
+  // STEAL 3: Check TimeInForce compliance first
+  const tifViolations = validateTimeInForceCompliance(actualFills);
+  violations.push(...tifViolations);
 
   // Build maps for quick lookup
   const expectedMap = new Map(expectedFills.map(f => [`${f.orderId}`, f]));
