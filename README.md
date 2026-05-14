@@ -10,10 +10,24 @@ Benchmarking low-latency systems is notoriously difficult. Noisy neighbors, non-
 
 ## Core Capabilities
 - **Submission Pipeline**: Ingests compressed engine artifacts (zip/tar) with manifest-driven configuration.
-- **Telemetry Stack**: Real-time event streaming via **Redpanda** (Kafka API) with long-term storage in **QuestDB** (ILP).
-- **Performance Scoring**: Composite scoring based on throughput/latency ratios and deterministic correctness multipliers.
-- **Competitive Leaderboard**: Global rankings powered by **Redis Sorted Sets** for sub-millisecond ranking updates.
-- **Premium Arena UI**: A high-density "Bloomberg Terminal" style dashboard for live monitoring and engine inspection.
+- **Real-time Telemetry**: Event streaming via **Redpanda** (Kafka API) with long-term storage in **QuestDB**.
+- **Performance Scoring**: Composite scoring based on throughput/latency ratios and correctness multipliers.
+- **Competitive Leaderboard**: Global rankings powered by **Redis Sorted Sets** with live updates.
+- **Premium Arena UI**: React dashboard for live monitoring, engine inspection, and submission tracking.
+- **Docker Sandboxing**: Isolated container execution with strict CPU, memory, and I/O limits.
+- **Health-Aware Load Generation**: Exponential backoff retry logic for sandbox readiness verification.
+
+## ✨ Working Features
+- ✅ Full end-to-end pipeline execution (all 8 stages)
+- ✅ Docker container creation and lifecycle management
+- ✅ Benchmark execution with configurable bot fleets
+- ✅ Real-time scoring computation
+- ✅ Leaderboard ranking and persistence
+- ✅ Web dashboard with submission details and performance dossiers
+- ✅ Telemetry ingestion and time-series storage
+- ✅ Multi-factor scoring formula with environment-tunable weights
+- ✅ API endpoints for all services (health, submit, status, leaderboard, runs)
+- ✅ Database persistence with Prisma ORM
 
 ## Why this arena is different
 
@@ -137,6 +151,13 @@ The UI is built for "nanosecond warfare" visibility:
 - **/pipeline/:id**: Real-time visualization of the build/sandbox/benchmark lifecycle.
 - **/upload**: Submit new engines with manifest validation.
 
+## Contestant Engine Contract
+Contestant services must expose `/health`, `/orders`, `/cancel`, and `/orderbook`.
+The exact request/response schema is documented in
+[`docs/contestant-api.openapi.yaml`](docs/contestant-api.openapi.yaml). The local
+benchmark engine currently targets the short paths (`/orders`, `/cancel`,
+`/orderbook`) defined there.
+
 ## Getting Started
 
 ### 1. Bootstrap Infrastructure
@@ -165,19 +186,23 @@ pnpm dev
 4. View your rank in the Arena Standings.
 
 ## Current Status
-- **Production-Ready**: Telemetry ingestion, Leaderboard (Redis), and Frontend UI.
-- **Functional MVP**: Scoring logic, metadata retrieval, and orchestrator simulation.
-- **Simulated (Phase 6)**: The Docker Build and Sandbox Isolation steps are currently handled via a stateful simulator in `submission-api`. 
-- **Next**: Integration of real Firecracker MicroVMs for Phase 7 resource isolation.
+✅ **Fully Implemented Features:**
+- **End-to-End Pipeline**: Complete submission lifecycle from upload → build → sandbox → benchmark → scoring → leaderboard
+- **Docker Sandbox Isolation**: Containers with 1 CPU, 512MB RAM, seccomp profiles, and read-only filesystems
+- **Real-Time Benchmarking**: Bot fleet executing stress scenarios with configurable RPS targets
+- **Composite Scoring**: Multi-factor scoring based on throughput, latency, and correctness multipliers
+- **Live Leaderboard**: Redis ZSET rankings with real-time updates
+- **Performance Dashboard**: React UI with submission tracking, scoring breakdowns, and pipeline visualization
+- **Telemetry Pipeline**: Redpanda streaming → QuestDB time-series storage
+- **Health Probe Resilience**: Exponential backoff retry logic for sandbox readiness verification
+- **Configurable Weights**: Environment-based tuning for scoring formula components
+- **Database Persistence**: PostgreSQL with Prisma ORM for all pipeline state and results
 
-## Limitations
+## Known Limitations
 
-This is a hackathon‑driven MVP, not a production exchange:
-
-- Sandbox isolation today is Docker‑based with strict limits; Firecracker MicroVMs are a planned next phase.
-- Kernel‑level telemetry via eBPF/OpenTelemetry is experimental and not yet wired into all dashboards.
-- Benchmarks currently run in a single‑cluster, single‑region environment.
-- Score tie‑breaking for engines with identical metrics is still basic and may evolve.
+- Sandbox isolation is Docker-based; future phases may add Firecracker MicroVMs for stronger isolation
+- Single-region, single-cluster environment
+- Kernel-level telemetry (eBPF/OpenTelemetry) is experimental and not yet integrated into dashboards
 
 ## What makes this interesting
 The platform doesn't just measure speed; it measures **consistency**. By combining time-series telemetry (QuestDB) with a competitive ranking system (Redis), it transforms dry systems engineering into a high-stakes arena.

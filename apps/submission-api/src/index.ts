@@ -11,6 +11,106 @@ import { Queue } from 'bullmq';
 import { QUEUES, BuildJobPayload } from '@benchmark/shared-types';
 import Redis from 'ioredis';
 
+// Helper to safely convert dates to ISO string
+function toISOString(date: any): string | null {
+  if (!date) return null;
+  if (typeof date === 'string') return date;
+  if (date instanceof Date) return date.toISOString();
+  return null;
+}
+
+// Helper function to compute pipeline state from submission and runs
+function computePipelineState(submission: any, benchmarkRuns: any[] = []) {
+  try {
+    const run = benchmarkRuns.length > 0 ? benchmarkRuns[0] : null;
+    
+    const steps = [
+      {
+        name: 'SUBMISSION_RECEIVED',
+        status: submission.status !== 'PENDING' ? 'DONE' : 'PENDING',
+        message: 'Submission received',
+        startedAt: toISOString(submission.createdAt),
+        completedAt: toISOString(submission.createdAt),
+        data: {}
+      },
+      {
+        name: 'BUILDING_IMAGE',
+        status: submission.buildJobs && submission.buildJobs.length > 0 
+          ? (submission.buildJobs[0]?.status === 'COMPLETED' ? 'DONE' : submission.buildJobs[0]?.status === 'FAILED' ? 'FAILED' : 'IN_PROGRESS')
+          : 'PENDING',
+        message: 'Building Docker image',
+        startedAt: toISOString(submission.buildJobs?.[0]?.createdAt) || null,
+        completedAt: toISOString(submission.buildJobs?.[0]?.completedAt) || null,
+        data: { buildJobs: submission.buildJobs?.length || 0 }
+      },
+      {
+        name: 'STARTING_SANDBOX',
+        status: run?.status === 'COMPLETED' || run?.status === 'RUNNING' ? 'DONE' : run ? 'IN_PROGRESS' : 'PENDING',
+        message: 'Starting sandbox container',
+        startedAt: toISOString(run?.createdAt) || null,
+        completedAt: null,
+        data: { containerId: run?.containerId || null }
+      },
+      {
+        name: 'RUNNING_BENCHMARK',
+        status: run?.status === 'COMPLETED' ? 'DONE' : run?.status === 'RUNNING' ? 'IN_PROGRESS' : 'PENDING',
+        message: 'Running benchmark load test',
+        startedAt: toISOString(run?.createdAt) || null,
+        completedAt: null,
+        data: {}
+      },
+      {
+        name: 'EVALUATING_CORRECTNESS',
+        status: submission.status === 'COMPLETED' ? 'DONE' : submission.status === 'FAILED' ? 'FAILED' : 'PENDING',
+        message: 'Evaluating correctness',
+        startedAt: null,
+        completedAt: null,
+        data: {}
+      },
+      {
+        name: 'COMPUTING_SCORE',
+        status: submission.status === 'COMPLETED' ? 'DONE' : 'PENDING',
+        message: 'Computing composite score',
+        startedAt: null,
+        completedAt: null,
+        data: {}
+      },
+      {
+        name: 'LEADERBOARD_UPDATED',
+        status: submission.status === 'COMPLETED' ? 'DONE' : 'PENDING',
+        message: 'Leaderboard updated',
+        startedAt: null,
+        completedAt: null,
+        data: {}
+      },
+      {
+        name: 'COMPLETE',
+        status: submission.status === 'COMPLETED' ? 'DONE' : submission.status === 'FAILED' ? 'FAILED' : 'PENDING',
+        message: submission.status === 'FAILED' ? 'Pipeline failed' : submission.status === 'COMPLETED' ? 'Pipeline completed' : 'Waiting for completion',
+        startedAt: null,
+        completedAt: submission.status === 'COMPLETED' ? new Date().toISOString() : null,
+        data: {}
+      }
+    ];
+
+    const submissionStatus = submission.status === 'COMPLETED' ? 'COMPLETED' : submission.status === 'FAILED' ? 'FAILED' : 'RUNNING';
+    
+    return {
+      submissionId: submission.id,
+      benchmarkRunId: run?.id || null,
+      scenario: 'smoke',
+      userEmail: submission.user?.email || submission.userEmail || 'unknown@cluster.io',
+      status: submissionStatus,
+      steps,
+      createdAt: toISOString(submission.createdAt),
+      explanation: null
+    };
+  } catch (err) {
+    console.error('Error computing pipeline state:', err);
+    throw err;
+  }
+}
+
 const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 const buildQueue = new Queue<BuildJobPayload>(QUEUES.BUILD, { connection: redisConnection });
 
@@ -308,12 +408,103 @@ fastify.get<{ Params: { id: string } }>('/runs/:id', async (request, reply) => {
       score: true
     }
   });
+
+  if (!run) return reply.status(404).send({ error: 'Run not found' });
   
-  return run;
+  return {
+    ...run,
+    submission: {
+      ...run.submission,
+      sizeBytes: run.submission.sizeBytes?.toString()
+    }
+  };
 });
 
-fastify.get('/orchestrator/pipelines', async () => {
-  return Object.values(pipelines);
+/**
+ * POST /orchestrator/run
+ * Trigger the pipeline for a submission (pipeline orchestration is already triggered via BullMQ in /submit)
+ */
+fastify.post<{ Body: { submissionId: string; benchmarkRunId?: string; buildJobId?: string; userEmail?: string; scenario?: string } }>(
+  '/orchestrator/run',
+  async (request, reply) => {
+    const { submissionId } = request.body;
+
+    try {
+      const submission = await prisma.submission.findUnique({
+        where: { id: submissionId },
+        include: { 
+          buildJobs: { orderBy: { createdAt: 'desc' } },
+          benchmarkRuns: { orderBy: { createdAt: 'desc' } },
+          user: { select: { email: true } }
+        }
+      });
+
+      if (!submission) {
+        return reply.status(404).send({ error: 'Submission not found' });
+      }
+
+      // Return pipeline state
+      return reply.status(200).send(computePipelineState(submission, submission.benchmarkRuns));
+    } catch (err) {
+      fastify.log.error(err);
+      return reply.status(500).send({ error: String(err) });
+    }
+  }
+);
+
+/**
+ * GET /orchestrator/status/:submissionId
+ * Get current pipeline status for a submission
+ */
+fastify.get<{ Params: { submissionId: string } }>(
+  '/orchestrator/status/:submissionId',
+  async (request, reply) => {
+    const { submissionId } = request.params;
+
+    try {
+      const submission = await prisma.submission.findUnique({
+        where: { id: submissionId },
+        include: { 
+          buildJobs: { orderBy: { createdAt: 'desc' } },
+          benchmarkRuns: { orderBy: { createdAt: 'desc' } },
+          user: { select: { email: true } }
+        }
+      });
+
+      if (!submission) {
+        return reply.status(404).send({ error: 'Submission not found' });
+      }
+
+      return reply.status(200).send(computePipelineState(submission, submission.benchmarkRuns));
+    } catch (err) {
+      fastify.log.error(err);
+      return reply.status(500).send({ error: String(err) });
+    }
+  }
+);
+
+/**
+ * GET /orchestrator/pipelines
+ * Get all pipeline statuses
+ */
+fastify.get('/orchestrator/pipelines', async (request, reply) => {
+  try {
+    const submissions = await prisma.submission.findMany({
+      include: { 
+        buildJobs: { orderBy: { createdAt: 'desc' } },
+        benchmarkRuns: { orderBy: { createdAt: 'desc' } },
+        user: { select: { email: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return reply.status(200).send(
+      submissions.map(s => computePipelineState(s, s.benchmarkRuns))
+    );
+  } catch (err) {
+    fastify.log.error(err);
+    return reply.status(500).send({ error: String(err) });
+  }
 });
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────

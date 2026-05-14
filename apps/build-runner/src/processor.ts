@@ -17,6 +17,7 @@ import { BuildLogger } from './buildLogger';
 import { validateManifest } from './manifest';
 import { extractArtifact } from './extractor';
 import { runCommand } from './executor';
+import { emitPipelineEvent } from './pipelineEvents';
 import { BuildResult, SubmissionManifest } from './types';
 import {
   artifactAbsolutePath,
@@ -35,6 +36,40 @@ export interface ProcessResult {
   buildJobId?: string;
   status?: 'SUCCESS' | 'FAILED';
   error?: string;
+}
+
+/**
+ * Claim and process the next queued BuildJob.
+ * Used by HTTP endpoints to manually trigger job processing.
+ */
+export async function processNextJob(): Promise<ProcessResult> {
+  try {
+    // Find the next QUEUED job
+    const job = await prisma.buildJob.findFirst({
+      where: { status: 'QUEUED' },
+      include: { submission: true },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    if (!job) {
+      return { claimed: false };
+    }
+
+    // Construct payload
+    const payload: BuildJobPayload = {
+      submissionId: job.submission.id,
+      buildJobId: job.id,
+      storedPath: job.submission.storedPath || ''
+    };
+
+    // Process the job
+    return await processJob(payload);
+  } catch (err) {
+    return { 
+      claimed: false, 
+      error: `Failed to claim next job: ${String(err)}` 
+    };
+  }
 }
 
 export async function processJob(payload: BuildJobPayload): Promise<ProcessResult> {
@@ -257,8 +292,3 @@ export async function processJob(payload: BuildJobPayload): Promise<ProcessResul
 
   return { claimed: true, buildJobId: buildJob.id, status: 'SUCCESS' };
 }
-Phase 4 will advance it further)
-  await prisma.submission.update({
-    where: { id: submission.id },
-    data: { status: 'BUILDING' }
-  }

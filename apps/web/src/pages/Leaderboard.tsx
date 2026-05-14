@@ -25,14 +25,23 @@ function CountUp({ value, duration = 1.5 }: { value: number, duration?: number }
   return <span>{count.toFixed(1)}</span>
 }
 
-function StatsHeader() {
+function StatsHeader({ rows }: { rows: LeaderboardRow[] }) {
+  const globalTps = rows.reduce((sum, r) => sum + r.throughput, 0);
+  const fastestP99 = rows.length > 0 ? Math.min(...rows.map(r => r.p99Ms)) : 0;
+  const totalBenchmarks = rows.length;
+  
+  const formatTps = (tps: number) => {
+    if (tps >= 1000) return `${(tps / 1000).toFixed(1)}K`;
+    return tps.toFixed(0);
+  };
+  
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', marginBottom: '4rem' }}>
       {[
-        { label: 'GLOBAL TPS', value: '142.5K', icon: Zap, color: 'var(--accent)' },
-        { label: 'FASTEST P99', value: '1.24ms', icon: Activity, color: 'var(--accent-2)' },
-        { label: 'ACTIVE NODES', value: '12', icon: Server, color: 'var(--success)' },
-        { label: 'LIVE BENCHMARKS', value: '3', icon: Globe, color: 'var(--accent-3)' },
+        { label: 'GLOBAL TPS', value: formatTps(globalTps), icon: Zap, color: 'var(--accent)' },
+        { label: 'FASTEST P99', value: `${fastestP99.toFixed(2)}ms`, icon: Activity, color: 'var(--accent-2)' },
+        { label: 'ACTIVE NODES', value: totalBenchmarks.toString(), icon: Server, color: 'var(--success)' },
+        { label: 'LIVE BENCHMARKS', value: totalBenchmarks.toString(), icon: Globe, color: 'var(--accent-3)' },
       ].map((s, i) => (
         <div key={i} className="glass-card" style={{ padding: '1.5rem', borderLeft: `3px solid ${s.color}` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
@@ -157,26 +166,27 @@ function InspectionDrawer({ submissionId, onClose }: { submissionId: string, onC
               <div className="mono" style={{ fontSize: '1.5rem', fontWeight: 900 }}>{data.benchmarkRuns[0]?.p95LatencyMs?.toFixed(2) ?? '—'} ms</div>
             </div>
             <div className="glass-card" style={{ padding: '1.25rem', background: 'var(--surface-2)' }}>
-              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>MATCH RATE</div>
-              <div className="mono" style={{ fontSize: '1.5rem', fontWeight: 900 }}>100%</div>
+              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>SUCCESS RATE</div>
+              <div className="mono" style={{ fontSize: '1.5rem', fontWeight: 900 }}>
+                {data.benchmarkRuns[0]?.successCount !== undefined && data.benchmarkRuns[0]?.failureCount !== undefined 
+                  ? `${((data.benchmarkRuns[0].successCount / (data.benchmarkRuns[0].successCount + data.benchmarkRuns[0].failureCount)) * 100).toFixed(0)}%`
+                  : '—'}
+              </div>
             </div>
           </div>
 
           <div>
-            <div style={{ fontSize: '0.8rem', fontWeight: 800, marginBottom: '1.25rem' }}>SCORE BREAKDOWN</div>
+            <div style={{ fontSize: '0.8rem', fontWeight: 800, marginBottom: '1.25rem' }}>METRICS</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               {[
-                { label: 'Latency Efficiency', score: 85, color: 'var(--accent)' },
-                { label: 'Throughput Volume', score: 92, color: 'var(--accent-2)' },
-                { label: 'Error Margin', score: 100, color: 'var(--success)' },
+                { label: 'Throughput', value: `${data.benchmarkRuns[0]?.throughputRps?.toFixed(1) ?? '—'} RPS`, color: 'var(--accent-2)' },
+                { label: 'P99 Latency', value: `${data.benchmarkRuns[0]?.p99LatencyMs?.toFixed(2) ?? '—'} ms`, color: 'var(--accent)' },
+                { label: 'Overall Score', value: `${data.benchmarkRuns[0]?.scoreValue?.toFixed(3) ?? '—'}`, color: 'var(--success)' },
               ].map((s, i) => (
                 <div key={i}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
                     <span>{s.label}</span>
-                    <span className="mono">{s.score}/100</span>
-                  </div>
-                  <div style={{ height: '4px', background: 'var(--surface-3)', borderRadius: '2px' }}>
-                    <motion.div initial={{ width: 0 }} animate={{ width: `${s.score}%` }} style={{ height: '100%', background: s.color }} />
+                    <span className="mono" style={{ color: s.color }}>{s.value}</span>
                   </div>
                 </div>
               ))}
@@ -185,10 +195,11 @@ function InspectionDrawer({ submissionId, onClose }: { submissionId: string, onC
 
           <div className="glass-card" style={{ padding: '1.5rem', background: 'rgba(249,115,22,0.05)', border: '1px solid var(--accent-30)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', color: 'var(--accent)' }}>
-              <ShieldCheck size={18} /> <div style={{ fontSize: '0.8rem', fontWeight: 900 }}>CORRECTNESS VERIFIED</div>
+              <ShieldCheck size={18} /> <div style={{ fontSize: '0.8rem', fontWeight: 900 }}>BENCHMARK EXECUTED</div>
             </div>
             <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>
-              Deterministic execution validated across all 12 nodes. No protocol violations detected during stress scenarios.
+              Executed {data.benchmarkRuns[0]?.successCount ?? 0} successful requests with {data.benchmarkRuns[0]?.failureCount ?? 0} failures. 
+              Average latency: {data.benchmarkRuns[0]?.avgLatencyMs?.toFixed(2) ?? '—'}ms
             </p>
           </div>
 
@@ -203,11 +214,15 @@ function InspectionDrawer({ submissionId, onClose }: { submissionId: string, onC
 
 export function LeaderboardPage() {
   const [rows, setRows] = useState<LeaderboardRow[]>([])
+  const [overview, setOverview] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   useEffect(() => {
-    api.getLeaderboard().then(setRows).finally(() => setLoading(false))
+    Promise.all([
+      api.getLeaderboard().then(setRows),
+      api.getOverview?.().then(setOverview).catch(() => {})
+    ]).finally(() => setLoading(false))
   }, [])
 
   if (loading) return <div className="loading">Synchronizing Arena Data...</div>
@@ -235,7 +250,7 @@ export function LeaderboardPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--success)', fontSize: '0.8rem', fontWeight: 800 }}>
               <div className="terminal-blink" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--success)' }} /> LIVE_UPLINK_ACTIVE
             </div>
-            <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>| 512 total submissions processed</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>| {overview?.totalSubmissions ?? rows.length} total submissions processed</div>
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
@@ -244,7 +259,7 @@ export function LeaderboardPage() {
         </div>
       </div>
 
-      <StatsHeader />
+      <StatsHeader rows={rows} />
 
       {rows.length === 0 ? (
         <div className="placeholder-state" style={{ padding: '8rem 0' }}>

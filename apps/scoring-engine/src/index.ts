@@ -7,9 +7,15 @@ import cors from '@fastify/cors';
 import axios from 'axios';
 import Redis from 'ioredis';
 import { prisma } from '@benchmark/db';
+import { Worker, Queue } from 'bullmq';
+import { QUEUES, ScoringJobPayload } from '@benchmark/shared-types';
 
 const QUESTDB_URL = process.env.QUESTDB_URL || 'http://localhost:9003';
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+  maxRetriesPerRequest: null
+});
+const redis = redisConnection;
+const leaderboardQueue = new Queue<any>(QUEUES.LEADERBOARD, { connection: redisConnection });
 
 const fastify = Fastify({ logger: true });
 fastify.register(cors, { origin: true });
@@ -79,6 +85,93 @@ function computeCompositeScore(
     (WEIGHTS.correctness * correctnessScore);
 
   return Math.round(composite * 1000) / 1000; // Round to 3 decimals
+}
+
+function computeScoreBreakdown(p99Ms: number, throughput: number, correctnessRatio: number) {
+  const latencyScore = normalizeLatencyScore(p99Ms);
+  const throughputScore = normalizeThroughputScore(throughput);
+  const correctnessScore = Math.max(0, Math.min(1, correctnessRatio));
+  const totalScore = computeCompositeScore(latencyScore, throughputScore, correctnessScore);
+
+  return {
+    latencyScore,
+    throughputScore,
+    correctnessScore,
+    totalScore
+  };
+}
+
+async function persistScore(input: {
+  runId: string;
+  submissionId: string;
+  p99Ms: number;
+  throughput: number;
+  correctnessRatio: number;
+  requestCount?: number | null;
+  successCount?: number | null;
+}) {
+  const breakdown = computeScoreBreakdown(
+    input.p99Ms,
+    input.throughput,
+    input.correctnessRatio
+  );
+
+  const errorRateScore = input.requestCount && input.requestCount > 0
+    ? Math.max(0, Math.min(1, (input.successCount ?? 0) / input.requestCount))
+    : 1.0;
+
+  const score = await prisma.score.upsert({
+    where: { benchmarkRunId: input.runId },
+    update: {
+      totalScore: breakdown.totalScore,
+      latencyScore: breakdown.latencyScore,
+      throughputScore: breakdown.throughputScore,
+      errorRateScore,
+      correctnessMultiplier: breakdown.correctnessScore,
+      latency: input.p99Ms,
+      throughput: Math.round(input.throughput),
+      correctness: breakdown.correctnessScore,
+      rawScore: breakdown.totalScore
+    },
+    create: {
+      benchmarkRunId: input.runId,
+      totalScore: breakdown.totalScore,
+      rawScore: breakdown.totalScore,
+      latencyScore: breakdown.latencyScore,
+      throughputScore: breakdown.throughputScore,
+      errorRateScore,
+      correctnessMultiplier: breakdown.correctnessScore,
+      latency: input.p99Ms,
+      throughput: Math.round(input.throughput),
+      correctness: breakdown.correctnessScore
+    }
+  });
+
+  await prisma.benchmarkRun.update({
+    where: { id: input.runId },
+    data: {
+      status: 'EVALUATED',
+      scoreValue: breakdown.totalScore,
+      rankingEligible: breakdown.correctnessScore >= THRESHOLDS.correctnessGate,
+      evaluatedAt: new Date()
+    }
+  });
+
+  await redis.zadd('leaderboard:overall', breakdown.totalScore, input.submissionId);
+  await redis.zadd('leaderboard:latency', input.p99Ms, input.submissionId);
+  await redis.zadd('leaderboard:throughput', input.throughput, input.submissionId);
+
+  await redis.publish('score-updates', JSON.stringify({
+    submissionId: input.submissionId,
+    runId: input.runId,
+    totalScore: breakdown.totalScore,
+    latencyScore: breakdown.latencyScore,
+    throughputScore: breakdown.throughputScore,
+    correctnessScore: breakdown.correctnessScore,
+    timestamp: Date.now()
+  }));
+
+  return score;
 }
 
 /**
@@ -292,15 +385,91 @@ fastify.get<{ Params: { submissionId: string } }>(
   }
 );
 
+// ═══════════════════════════════════════════════════════════════════
+// BullMQ Worker: Process SCORING queue jobs
+// ═══════════════════════════════════════════════════════════════════
+
+const worker = new Worker<ScoringJobPayload>(
+  QUEUES.SCORING,
+  async (job: any) => {
+    fastify.log.info({ jobId: job.id, benchmarkRunId: job.data.benchmarkRunId }, `Processing scoring job`);
+    try {
+      // Query benchmark results for this run
+      const benchmarkRun = await prisma.benchmarkRun.findUnique({
+        where: { id: job.data.benchmarkRunId },
+        include: { submission: true }
+      });
+
+      if (!benchmarkRun) {
+        throw new Error(`BenchmarkRun ${job.data.benchmarkRunId} not found`);
+      }
+
+      const correctnessReport = await prisma.correctnessReport.findUnique({
+        where: { benchmarkRunId: job.data.benchmarkRunId }
+      });
+
+      const p99Ms = benchmarkRun.p99LatencyMs ?? benchmarkRun.avgLatencyMs;
+      const throughput = benchmarkRun.throughputRps;
+
+      if (p99Ms == null || throughput == null) {
+        throw new Error(`BenchmarkRun ${job.data.benchmarkRunId} has no benchmark summary metrics`);
+      }
+
+      const score = await persistScore({
+        runId: job.data.benchmarkRunId,
+        submissionId: job.data.submissionId,
+        p99Ms,
+        throughput,
+        correctnessRatio: correctnessReport?.correctnessRatio ?? 1.0,
+        requestCount: benchmarkRun.requestCount,
+        successCount: benchmarkRun.successCount
+      });
+
+      // Enqueue to leaderboard queue
+      await leaderboardQueue.add('update-leaderboard', {
+        submissionId: job.data.submissionId,
+        benchmarkRunId: job.data.benchmarkRunId,
+      });
+
+      return { status: 'EVALUATED', score: score.totalScore };
+    } catch (err) {
+      fastify.log.error({ jobId: job.id, error: err }, 'Worker job handler error');
+      throw err;
+    }
+  },
+  { connection: redisConnection, concurrency: 1 }
+);
+
+worker.on('completed', (job: any) => {
+  fastify.log.info({ jobId: job.id }, 'Scoring job completed successfully');
+});
+
+worker.on('failed', (job: any, err: any) => {
+  fastify.log.error({ jobId: job?.id, error: err.message, stack: err.stack }, 'Scoring job failed');
+});
+
+worker.on('error', (err: any) => {
+  fastify.log.error({ error: err.message, stack: err.stack }, 'Worker error');
+});
+
+worker.on('ready', () => {
+  fastify.log.info({ queueName: QUEUES.SCORING }, 'Scoring worker ready');
+});
+
+worker.on('drained', () => {
+  fastify.log.info('Scoring queue drained - all jobs processed');
+});
+
 const start = async () => {
   try {
     const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3007;
     await fastify.listen({ port, host: '0.0.0.0' });
     fastify.log.info(`Scoring engine listening on ${port}`);
+    fastify.log.info({ queueName: QUEUES.SCORING }, 'Worker subscribed to queue');
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
   }
 };
 
-
+start();

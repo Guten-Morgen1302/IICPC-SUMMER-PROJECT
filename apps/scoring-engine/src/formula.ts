@@ -4,8 +4,13 @@
  * Transparent, deterministic, auditable scoring system.
  *
  * FORMULA:
- *   rawScore = (latencyScore * 0.35) + (throughputScore * 0.40) + (errorRateScore * 0.25)
+ *   rawScore = (latencyScore * w_latency) + (throughputScore * w_throughput) + (errorRateScore * w_errorRate)
  *   finalScore = rawScore * correctnessMultiplier
+ *
+ * WEIGHTS (configurable via environment):
+ *   WEIGHT_LATENCY (default: 0.30)
+ *   WEIGHT_THROUGHPUT (default: 0.40)
+ *   WEIGHT_ERRORRATE (default: 0.30)
  *
  * COMPONENT SCORES (0–100 scale):
  *
@@ -87,7 +92,12 @@ export function correctnessMultiplier(classification: string): number {
 
 // ── Main scoring function ────────────────────────────────────────────────
 
-const WEIGHTS = { latency: 0.35, throughput: 0.40, errorRate: 0.25 };
+// Weights are configurable via environment variables for consistency with index.ts
+const WEIGHTS = {
+  latency: parseFloat(process.env.WEIGHT_LATENCY || '0.30'),
+  throughput: parseFloat(process.env.WEIGHT_THROUGHPUT || '0.40'),
+  errorRate: parseFloat(process.env.WEIGHT_ERRORRATE || '0.30')
+};
 
 export function computeScore(inputs: ScoringInputs): ScoringBreakdown {
   const latScore = computeLatencyScore(inputs.p50LatencyMs);

@@ -133,7 +133,7 @@ setInterval(async () => {
 
 const start = async () => {
   try {
-    const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3008;
+    const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3005;
     await fastify.listen({ port, host: '0.0.0.0' });
     fastify.log.info(`Telemetry ingestor listening on ${port}`);
     await startConsumer();

@@ -55,6 +55,8 @@ export const QUEUES = {
   SANDBOX: 'sandbox-queue',
   BENCHMARK: 'benchmark-queue',
   CORRECTNESS: 'correctness-queue',
+  SCORING: 'scoring-queue',
+  LEADERBOARD: 'leaderboard-queue',
 };
 
 // Job Payloads
@@ -78,3 +80,21 @@ export const BenchmarkJobPayloadSchema = z.object({
   sandboxUrl: z.string(),
 });
 export type BenchmarkJobPayload = z.infer<typeof BenchmarkJobPayloadSchema>;
+
+export const CorrectnessJobPayloadSchema = z.object({
+  submissionId: z.string(),
+  benchmarkRunId: z.string(),
+});
+export type CorrectnessJobPayload = z.infer<typeof CorrectnessJobPayloadSchema>;
+
+export const ScoringJobPayloadSchema = z.object({
+  submissionId: z.string(),
+  benchmarkRunId: z.string(),
+});
+export type ScoringJobPayload = z.infer<typeof ScoringJobPayloadSchema>;
+
+export const LeaderboardJobPayloadSchema = z.object({
+  submissionId: z.string(),
+  benchmarkRunId: z.string(),
+});
+export type LeaderboardJobPayload = z.infer<typeof LeaderboardJobPayloadSchema>;

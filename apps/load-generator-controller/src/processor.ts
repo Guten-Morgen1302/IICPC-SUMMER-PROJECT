@@ -55,16 +55,52 @@ export async function claimNextBenchmarkRun() {
 function healthProbe(baseUrl: string, timeoutMs: number = 5000): Promise<boolean> {
   return new Promise((resolve) => {
     const url = new URL('/health', baseUrl);
-    const req = http.get(
-      { hostname: url.hostname, port: url.port, path: url.pathname, timeout: timeoutMs },
-      (res) => {
-        let body = '';
-        res.on('data', (c: Buffer) => { body += c; });
-        res.on('end', () => resolve((res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 400));
-      }
-    );
-    req.on('timeout', () => { req.destroy(); resolve(false); });
-    req.on('error', () => resolve(false));
+    const port = parseInt(url.port, 10) || (url.protocol === 'https:' ? 443 : 80);
+    
+    let attempts = 0;
+    const maxAttempts = 10; // Increased from 5
+    const attemptDelay = 800; // Start with 800ms
+    
+    const tryProbe = () => {
+      attempts++;
+      console.log(`[healthProbe] Attempt ${attempts}/${maxAttempts} - ${baseUrl}`);
+      
+      const req = http.get(
+        { hostname: url.hostname, port, path: url.pathname, timeout: 3000 }, // Increased from 2000
+        (res) => {
+          const isHealthy = (res.statusCode ?? 0) >= 200 && (res.statusCode ?? 0) < 400;
+          console.log(`[healthProbe] Got ${res.statusCode} - ${isHealthy ? 'HEALTHY' : 'UNHEALTHY'}`);
+          resolve(isHealthy);
+        }
+      );
+      
+      req.on('timeout', () => {
+        console.log(`[healthProbe] Attempt ${attempts} timed out`);
+        req.destroy();
+        if (attempts < maxAttempts) {
+          const delay = attemptDelay * attempts; // Exponential backoff
+          console.log(`[healthProbe] Waiting ${delay}ms before retry...`);
+          setTimeout(tryProbe, delay);
+        } else {
+          console.log(`[healthProbe] Max attempts reached, giving up`);
+          resolve(false);
+        }
+      });
+      
+      req.on('error', (err) => {
+        console.log(`[healthProbe] Attempt ${attempts} error: ${err.message}`);
+        if (attempts < maxAttempts) {
+          const delay = attemptDelay * attempts; // Exponential backoff
+          console.log(`[healthProbe] Waiting ${delay}ms before retry...`);
+          setTimeout(tryProbe, delay);
+        } else {
+          console.log(`[healthProbe] Max attempts reached, giving up`);
+          resolve(false);
+        }
+      });
+    };
+    
+    tryProbe();
   });
 }
 

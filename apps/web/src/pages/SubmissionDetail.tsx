@@ -221,10 +221,10 @@ export function SubmissionDetailPage() {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem' }}>
             {[
-              { label: 'p50 Latency', value: '0.84ms', trend: '-2%' },
-              { label: 'p95 Latency', value: '1.20ms', trend: '+1%' },
-              { label: 'p99 Latency', value: '2.40ms', trend: '0%' },
-              { label: 'Jitter', value: '0.04ms', trend: '-5%' }
+              { label: 'p50 Latency', value: `${(latestRun?.avgLatencyMs ?? 0).toFixed(2)}ms` },
+              { label: 'p95 Latency', value: `${(latestRun?.p95LatencyMs ?? 0).toFixed(2)}ms` },
+              { label: 'p99 Latency', value: `${(latestRun?.p99LatencyMs ?? 0).toFixed(2)}ms` },
+              { label: 'Throughput', value: `${(latestRun?.throughputRps ?? 0).toFixed(0)} RPS` }
             ].map((stat, i) => (
               <div key={i} className="glass-card" style={{ padding: '1rem', background: 'var(--surface-3)' }}>
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.5rem' }}>{stat.label}</div>
@@ -260,42 +260,52 @@ export function SubmissionDetailPage() {
 
       {tab === 'scoring' && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="section glass-card" style={{ padding: '2rem' }}>
-          <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-            <div style={{ fontSize: '4rem', fontWeight: 900, color: 'var(--accent)', letterSpacing: '-0.05em' }}>842.5</div>
-            <div style={{ textTransform: 'uppercase', fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '0.2em' }}>Final Performance Score</div>
-          </div>
+          {latestRun && latestRun.scoreValue !== null ? (
+            <>
+              <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
+                <div style={{ fontSize: '4rem', fontWeight: 900, color: 'var(--accent)', letterSpacing: '-0.05em' }}>
+                  {latestRun.scoreValue.toFixed(3)}
+                </div>
+                <div style={{ textTransform: 'uppercase', fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '0.2em' }}>Final Performance Score</div>
+              </div>
 
-          <div style={{ maxWidth: 600, margin: '0 auto' }}>
-            <div style={{ marginBottom: '2rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-                <span>Throughput Weight (60%)</span>
-                <span className="mono">750.0 pts</span>
-              </div>
-              <div style={{ height: '8px', background: 'var(--surface-3)', borderRadius: '4px', overflow: 'hidden' }}>
-                <motion.div initial={{ width: 0 }} animate={{ width: '85%' }} transition={{ duration: 1 }} style={{ height: '100%', background: 'var(--accent)' }} />
-              </div>
-            </div>
+              <div style={{ maxWidth: 600, margin: '0 auto' }}>
+                <div style={{ marginBottom: '2rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                    <span>Throughput: {latestRun.throughputRps?.toFixed(1) ?? '—'} RPS</span>
+                    <span className="mono">{(latestRun.throughputRps ?? 0).toFixed(1)} rps</span>
+                  </div>
+                  <div style={{ height: '8px', background: 'var(--surface-3)', borderRadius: '4px', overflow: 'hidden' }}>
+                    <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min((latestRun.throughputRps ?? 0) / 100, 1) * 100}%` }} transition={{ duration: 1 }} style={{ height: '100%', background: 'var(--accent)' }} />
+                  </div>
+                </div>
 
-            <div style={{ marginBottom: '2rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-                <span>Latency Penalty (40%)</span>
-                <span className="mono">-107.5 pts</span>
-              </div>
-              <div style={{ height: '8px', background: 'var(--surface-3)', borderRadius: '4px', overflow: 'hidden' }}>
-                <motion.div initial={{ width: 0 }} animate={{ width: '25%' }} transition={{ duration: 1 }} style={{ height: '100%', background: 'var(--error)' }} />
-              </div>
-            </div>
+                <div style={{ marginBottom: '2rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                    <span>Latency (p99): {latestRun.p99LatencyMs?.toFixed(2) ?? '—'}ms</span>
+                    <span className="mono">{(latestRun.p99LatencyMs ?? 0).toFixed(2)}ms</span>
+                  </div>
+                  <div style={{ height: '8px', background: 'var(--surface-3)', borderRadius: '4px', overflow: 'hidden' }}>
+                    <motion.div initial={{ width: 0 }} animate={{ width: `${Math.max(1 - (latestRun.p99LatencyMs ?? 0) / 100, 0) * 100}%` }} transition={{ duration: 1 }} style={{ height: '100%', background: 'var(--success)' }} />
+                  </div>
+                </div>
 
-            <div style={{ padding: '1.5rem', background: 'var(--surface-2)', borderRadius: '12px', border: '1px dashed var(--border)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--success)', fontWeight: 800, fontSize: '0.8rem' }}>
-                <ShieldCheck size={16} /> CORRECTNESS MULTIPLIER: 1.0x (PLATINUM)
+                <div style={{ padding: '1.5rem', background: 'var(--surface-2)', borderRadius: '12px', border: '1px dashed var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: 'var(--success)', fontWeight: 800, fontSize: '0.8rem' }}>
+                    <ShieldCheck size={16} /> EVALUATION: {latestRun.correctnessStatus ?? 'PENDING'}
+                  </div>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
+                    Success Rate: {latestRun.successCount}/{(latestRun.successCount ?? 0) + (latestRun.failureCount ?? 0)} requests · 
+                    Avg Latency: {(latestRun.avgLatencyMs ?? 0).toFixed(2)}ms
+                  </p>
+                </div>
               </div>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
-                Score calculated as <code>(throughput_rps / p99_latency_ms) * correctness_factor</code>. 
-                Your engine demonstrated superior p99 stability under the stress scenario.
-              </p>
+            </>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Scoring data not yet available</div>
             </div>
-          </div>
+          )}
         </motion.div>
       )}
     </motion.div>

@@ -16,9 +16,17 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import axios from 'axios';
 import { prisma } from '@benchmark/db';
+import { Worker, Queue } from 'bullmq';
+import { QUEUES, CorrectnessJobPayload } from '@benchmark/shared-types';
+import Redis from 'ioredis';
 
 const fastify = Fastify({ logger: true });
 fastify.register(cors, { origin: true });
+
+const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+  maxRetriesPerRequest: null
+});
+const scoringQueue = new Queue<any>(QUEUES.SCORING, { connection: redisConnection });
 
 const QUESTDB_URL = process.env.QUESTDB_URL || 'http://localhost:9003';
 
@@ -242,11 +250,74 @@ fastify.get<{ Querystring: { submissionId?: string } }>(
   }
 );
 
+// ═══════════════════════════════════════════════════════════════════
+// BullMQ Worker: Process CORRECTNESS queue jobs
+// ═══════════════════════════════════════════════════════════════════
+
+const worker = new Worker<CorrectnessJobPayload>(
+  QUEUES.CORRECTNESS,
+  async (job: any) => {
+    fastify.log.info({ jobId: job.id, benchmarkRunId: job.data.benchmarkRunId }, `Processing correctness evaluation job`);
+    try {
+      // Query benchmark results for this run
+      const benchmarkRun = await prisma.benchmarkRun.findUnique({
+        where: { id: job.data.benchmarkRunId },
+        include: { submission: true }
+      });
+
+      if (!benchmarkRun) {
+        throw new Error(`BenchmarkRun ${job.data.benchmarkRunId} not found`);
+      }
+
+      // TODO: Implement correctness validation logic here
+      // For now, mark as evaluated and enqueue to scoring
+      
+      await prisma.benchmarkRun.update({
+        where: { id: job.data.benchmarkRunId },
+        data: { status: 'EVALUATED' }
+      });
+
+      // Enqueue to scoring queue
+      await scoringQueue.add('compute-score', {
+        submissionId: job.data.submissionId,
+        benchmarkRunId: job.data.benchmarkRunId,
+      });
+
+      return { status: 'EVALUATED' };
+    } catch (err) {
+      fastify.log.error({ jobId: job.id, error: err }, 'Worker job handler error');
+      throw err;
+    }
+  },
+  { connection: redisConnection, concurrency: 1 }
+);
+
+worker.on('completed', (job: any) => {
+  fastify.log.info({ jobId: job.id }, 'Correctness job completed successfully');
+});
+
+worker.on('failed', (job: any, err: any) => {
+  fastify.log.error({ jobId: job?.id, error: err.message, stack: err.stack }, 'Correctness job failed');
+});
+
+worker.on('error', (err: any) => {
+  fastify.log.error({ error: err.message, stack: err.stack }, 'Worker error');
+});
+
+worker.on('ready', () => {
+  fastify.log.info({ queueName: QUEUES.CORRECTNESS }, 'Correctness worker ready');
+});
+
+worker.on('drained', () => {
+  fastify.log.info('Correctness queue drained - all jobs processed');
+});
+
 const start = async () => {
   try {
     const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3006;
     await fastify.listen({ port, host: '0.0.0.0' });
     fastify.log.info(`Correctness engine listening on ${port}`);
+    fastify.log.info({ queueName: QUEUES.CORRECTNESS }, 'Worker subscribed to queue');
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

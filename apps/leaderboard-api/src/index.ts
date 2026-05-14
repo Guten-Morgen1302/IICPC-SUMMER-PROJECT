@@ -6,8 +6,13 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import Redis from 'ioredis';
 import { prisma } from '@benchmark/db';
+import { Worker } from 'bullmq';
+import { QUEUES, LeaderboardJobPayload } from '@benchmark/shared-types';
 
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+  maxRetriesPerRequest: null
+});
+const redis = redisConnection;
 const fastify = Fastify({ logger: true });
 
 fastify.register(cors, { origin: true });
@@ -26,7 +31,10 @@ fastify.get('/overview', async () => {
     prisma.benchmarkRun.count({ where: { status: 'EVALUATED' } })
   ]);
 
-  const topScore = await redis.zrevrange('leaderboard:overall', 0, 0, 'WITHSCORES');
+  const [topScore, rankedEntries] = await Promise.all([
+    redis.zrevrange('leaderboard:overall', 0, 0, 'WITHSCORES'),
+    redis.zcard('leaderboard:overall')
+  ]);
   
   return {
     totalSubmissions,
@@ -34,9 +42,9 @@ fastify.get('/overview', async () => {
     benchmarkedRuns,
     evaluatedRuns,
     topScore: topScore[1] ? parseFloat(topScore[1]) : 0,
-    buildsSucceeded: totalSubmissions, // placeholder
-    buildsFailed: 0,
-    rankedEntries: totalSubmissions
+    buildsSucceeded: await prisma.buildJob.count({ where: { status: 'SUCCESS' } }),
+    buildsFailed: await prisma.buildJob.count({ where: { status: 'FAILED' } }),
+    rankedEntries
   };
 });
 
@@ -113,10 +121,87 @@ fastify.get<{ Params: { runId: string } }>('/runs/:runId/score', async (request,
   };
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// BullMQ Worker: Process LEADERBOARD queue jobs
+// ═══════════════════════════════════════════════════════════════════
+
+const worker = new Worker<LeaderboardJobPayload>(
+  QUEUES.LEADERBOARD,
+  async (job: any) => {
+    fastify.log.info({ jobId: job.id, benchmarkRunId: job.data.benchmarkRunId }, `Processing leaderboard update job`);
+    try {
+      // Query benchmark results for this run
+      const benchmarkRun = await prisma.benchmarkRun.findUnique({
+        where: { id: job.data.benchmarkRunId },
+        include: { submission: true }
+      });
+
+      if (!benchmarkRun) {
+        throw new Error(`BenchmarkRun ${job.data.benchmarkRunId} not found`);
+      }
+
+      const score = await prisma.score.findUnique({
+        where: { benchmarkRunId: job.data.benchmarkRunId }
+      });
+
+      if (!score) {
+        throw new Error(`Score for BenchmarkRun ${job.data.benchmarkRunId} not found`);
+      }
+
+      await redis.zadd('leaderboard:overall', score.totalScore, job.data.submissionId);
+      await redis.zadd('leaderboard:latency', score.latency, job.data.submissionId);
+      await redis.zadd('leaderboard:throughput', score.throughput, job.data.submissionId);
+
+      await prisma.benchmarkRun.update({
+        where: { id: job.data.benchmarkRunId },
+        data: {
+          status: 'EVALUATED',
+          scoreValue: score.totalScore,
+          rankingEligible: score.correctnessMultiplier > 0,
+          evaluatedAt: new Date()
+        }
+      });
+
+      await prisma.submission.update({
+        where: { id: job.data.submissionId },
+        data: { status: 'COMPLETED' }
+      });
+
+      return { status: 'UPDATED', score: score.totalScore };
+    } catch (err) {
+      fastify.log.error({ jobId: job.id, error: err }, 'Worker job handler error');
+      throw err;
+    }
+  },
+  { connection: redisConnection, concurrency: 1 }
+);
+
+worker.on('completed', (job: any) => {
+  fastify.log.info({ jobId: job.id }, 'Leaderboard job completed successfully');
+});
+
+worker.on('failed', (job: any, err: any) => {
+  fastify.log.error({ jobId: job?.id, error: err.message, stack: err.stack }, 'Leaderboard job failed');
+});
+
+worker.on('error', (err: any) => {
+  fastify.log.error({ error: err.message, stack: err.stack }, 'Worker error');
+});
+
+worker.on('ready', () => {
+  fastify.log.info({ queueName: QUEUES.LEADERBOARD }, 'Leaderboard worker ready');
+});
+
+worker.on('drained', () => {
+  fastify.log.info('Leaderboard queue drained - all jobs processed');
+});
+
 const start = async () => {
   try {
     const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3008;
     await fastify.listen({ port, host: '0.0.0.0' });
+    fastify.log.info('Leaderboard API listening');
+    fastify.log.info({ queueName: QUEUES.LEADERBOARD }, 'Worker subscribed to queue');
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
