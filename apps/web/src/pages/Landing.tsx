@@ -164,7 +164,7 @@ export function LandingPage() {
           {[
             { icon: <Activity size={28} color="var(--accent-2)" />, title: 'Realistic Workloads', body: 'Deterministic RNG-based order flow with configurable scenarios including steady-state and adversarial flash-crash conditions.' },
             { icon: <Shield size={28} color="var(--success)" />, title: 'Isolated Sandboxes', body: 'Each submission runs in its own Docker container with strict resource limits. No cross-contamination, ever.' },
-            { icon: <Zap size={28} color="var(--accent)" />, title: 'Honest Scoring', body: 'Weighted formula across latency (35%), throughput (40%), and error rate (25%), multiplied by a correctness factor.' },
+            { icon: <Zap size={28} color="var(--accent)" />, title: 'Honest Scoring', body: 'Composite formula balancing latency efficiency, throughput volume, and error margin with configurable weights and a correctness multiplier.' },
             { icon: <Terminal size={28} color="var(--accent-3)" />, title: 'Live Leaderboard', body: 'Rankings update in real-time as benchmarks complete. See how your engine stacks up against the competition instantly.' },
           ].map((f, i) => (
             <motion.div 
