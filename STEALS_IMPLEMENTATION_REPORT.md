@@ -1,23 +1,19 @@
-# IICPC Competitive Advantage Implementation - Steals Report
-
+# IICPC Competitive Advantage Implementation 
 **Generated**: May 14, 2026  
-**Status**: ✅ All 3 Steals Implemented + Kernel Tuning  
-**Sources**: gwrxuk/HFTPerformance, eelixir/mercury
+**Status**: ✅ + Kernel Tuning  
+
 
 ---
 
 ## Overview
 
-This document summarizes the implementation of 3 competitive advantages stolen from Mercury and HFTPerformance repos, plus kernel tuning for deterministic benchmarking.
+ plus kernel tuning for deterministic benchmarking.
 
 ---
 
-## STEAL 1: Adversarial Agent Types with Market Regimes
 
-**Location**: `apps/load-generator/bot-fleet-adversarial.js`
 
-### What We Stole
-Adaptive bot fleet from Mercury's reference implementation with 4 distinct agent types and 3 market regimes.
+
 
 ### Implementation
 
