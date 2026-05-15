@@ -136,6 +136,8 @@ function InspectionDrawer({ submissionId, onClose }: { submissionId: string, onC
     api.getSubmission(submissionId).then(setData)
   }, [submissionId])
 
+  const firstRun = data?.benchmarkRuns?.[0] ?? null
+
   return (
     <motion.div
       initial={{ x: '100%' }}
@@ -168,8 +170,8 @@ function InspectionDrawer({ submissionId, onClose }: { submissionId: string, onC
             <div className="glass-card" style={{ padding: '1.25rem', background: 'var(--surface-2)' }}>
               <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>SUCCESS RATE</div>
               <div className="mono" style={{ fontSize: '1.5rem', fontWeight: 900 }}>
-                {data.benchmarkRuns[0]?.successCount !== undefined && data.benchmarkRuns[0]?.failureCount !== undefined 
-                  ? `${((data.benchmarkRuns[0].successCount / (data.benchmarkRuns[0].successCount + data.benchmarkRuns[0].failureCount)) * 100).toFixed(0)}%`
+                {firstRun?.successCount !== undefined && firstRun?.failureCount !== undefined 
+                  ? `${((firstRun.successCount / (firstRun.successCount + firstRun.failureCount)) * 100).toFixed(0)}%`
                   : '—'}
               </div>
             </div>
