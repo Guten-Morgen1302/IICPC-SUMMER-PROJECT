@@ -1,0 +1,225 @@
+# ── ClusterIP Services for all platform microservices ────────────────
+# Internal DNS: <service-name>.<namespace>.svc.cluster.local
+
+# ── submission-api ───────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: submission-api-svc
+  namespace: iicpc
+  labels:
+    app: submission-api
+spec:
+  type: NodePort          # publicly reachable for contestant uploads
+  selector:
+    app: submission-api
+  ports:
+    - name: http
+      port: 3001
+      targetPort: 3001
+      nodePort: 30001
+---
+# ── build-runner ─────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: build-runner-svc
+  namespace: iicpc
+  labels:
+    app: build-runner
+spec:
+  type: ClusterIP
+  selector:
+    app: build-runner
+  ports:
+    - name: http
+      port: 3002
+      targetPort: 3002
+---
+# ── sandbox-manager ──────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-manager-svc
+  namespace: iicpc
+  labels:
+    app: sandbox-manager
+spec:
+  type: ClusterIP
+  selector:
+    app: sandbox-manager
+  ports:
+    - name: http
+      port: 3003
+      targetPort: 3003
+---
+# ── load-generator-controller ────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: load-generator-controller-svc
+  namespace: iicpc
+  labels:
+    app: load-generator-controller
+spec:
+  type: ClusterIP
+  selector:
+    app: load-generator-controller
+  ports:
+    - name: http
+      port: 3004
+      targetPort: 3004
+---
+# ── telemetry-ingestor ───────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: telemetry-ingestor-svc
+  namespace: iicpc
+  labels:
+    app: telemetry-ingestor
+spec:
+  type: ClusterIP
+  selector:
+    app: telemetry-ingestor
+  ports:
+    - name: http
+      port: 3005
+      targetPort: 3005
+---
+# ── correctness-engine ───────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: correctness-engine-svc
+  namespace: iicpc
+  labels:
+    app: correctness-engine
+spec:
+  type: ClusterIP
+  selector:
+    app: correctness-engine
+  ports:
+    - name: http
+      port: 3006
+      targetPort: 3006
+---
+# ── scoring-engine ───────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: scoring-engine-svc
+  namespace: iicpc
+  labels:
+    app: scoring-engine
+spec:
+  type: ClusterIP
+  selector:
+    app: scoring-engine
+  ports:
+    - name: http
+      port: 3007
+      targetPort: 3007
+---
+# ── leaderboard-api (HTTP + WebSocket on same port) ──────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: leaderboard-api-svc
+  namespace: iicpc
+  labels:
+    app: leaderboard-api
+spec:
+  type: NodePort
+  selector:
+    app: leaderboard-api
+  ports:
+    - name: http-ws
+      port: 3008
+      targetPort: 3008
+      nodePort: 30008
+---
+# ── Redis ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-svc
+  namespace: iicpc
+spec:
+  type: ClusterIP
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+---
+# ── PostgreSQL ────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-svc
+  namespace: iicpc
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+# ── Redpanda ──────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: redpanda-svc
+  namespace: iicpc
+spec:
+  type: ClusterIP
+  selector:
+    app: redpanda
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: 9092
+    - name: kafka-internal
+      port: 29092
+      targetPort: 29092
+---
+# ── QuestDB ───────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: questdb-svc
+  namespace: iicpc
+spec:
+  type: ClusterIP
+  selector:
+    app: questdb
+  ports:
+    - name: http
+      port: 9000
+      targetPort: 9000
+    - name: ilp
+      port: 9009
+      targetPort: 9009
+    - name: pg
+      port: 8812
+      targetPort: 8812
+---
+# ── MinIO ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-svc
+  namespace: iicpc
+spec:
+  type: ClusterIP
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001

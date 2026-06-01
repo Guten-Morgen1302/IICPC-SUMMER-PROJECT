@@ -122,6 +122,71 @@ fastify.get<{ Params: { runId: string } }>('/runs/:runId/score', async (request,
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// WebSocket Live Leaderboard Push
+// ═══════════════════════════════════════════════════════════════════
+
+import { WebSocketServer, WebSocket } from 'ws';
+
+// Connected browser clients
+const wsClients = new Set<WebSocket>();
+
+/**
+ * Fetch the current top-50 leaderboard snapshot and broadcast it to
+ * every connected WebSocket client.
+ */
+async function broadcastLeaderboard(): Promise<void> {
+  if (wsClients.size === 0) return;
+
+  try {
+    const topData = await redis.zrevrange('leaderboard:overall', 0, 49, 'WITHSCORES');
+    const rows: Array<Record<string, unknown>> = [];
+
+    for (let i = 0; i < topData.length; i += 2) {
+      const submissionId = topData[i];
+      const score = parseFloat(topData[i + 1]);
+
+      const submission = await prisma.submission.findUnique({
+        where: { id: submissionId },
+        include: {
+          user: { select: { email: true } },
+          benchmarkRuns: {
+            where: { status: 'EVALUATED' },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: { p99LatencyMs: true, throughputRps: true }
+          }
+        }
+      });
+
+      if (submission) {
+        const run = submission.benchmarkRuns[0];
+        rows.push({
+          rank: (i / 2) + 1,
+          submissionId,
+          engineName: submission.originalFilename || 'Anonymous',
+          developer: submission.user.email.split('@')[0],
+          score,
+          p99Ms: run?.p99LatencyMs ?? 0,
+          throughput: run?.throughputRps ?? 0
+        });
+      }
+    }
+
+    const payload = JSON.stringify({ type: 'LEADERBOARD_UPDATE', data: rows, ts: Date.now() });
+
+    for (const client of wsClients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    }
+
+    fastify.log.info({ clients: wsClients.size, rows: rows.length }, 'Broadcasted leaderboard update');
+  } catch (err) {
+    fastify.log.error({ err }, 'Failed to broadcast leaderboard update');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // BullMQ Worker: Process LEADERBOARD queue jobs
 // ═══════════════════════════════════════════════════════════════════
 
@@ -167,6 +232,9 @@ const worker = new Worker<LeaderboardJobPayload>(
         data: { status: 'COMPLETED' }
       });
 
+      // 🔴 Broadcast live update to all connected WebSocket clients
+      await broadcastLeaderboard();
+
       return { status: 'UPDATED', score: score.totalScore };
     } catch (err) {
       fastify.log.error({ jobId: job.id, error: err }, 'Worker job handler error');
@@ -202,6 +270,38 @@ const start = async () => {
     await fastify.listen({ port, host: '0.0.0.0' });
     fastify.log.info('Leaderboard API listening');
     fastify.log.info({ queueName: QUEUES.LEADERBOARD }, 'Worker subscribed to queue');
+
+    // Attach WebSocket server to the same underlying HTTP server (same port)
+    const wss = new WebSocketServer({ server: fastify.server });
+    fastify.log.info('WebSocket server attached on same port as HTTP');
+
+    wss.on('connection', (ws, req) => {
+      wsClients.add(ws);
+      fastify.log.info({ clients: wsClients.size }, 'WebSocket client connected');
+
+      // Send immediate snapshot on connect so UI isn't blank
+      broadcastLeaderboard();
+
+      ws.on('close', () => {
+        wsClients.delete(ws);
+        fastify.log.info({ clients: wsClients.size }, 'WebSocket client disconnected');
+      });
+
+      ws.on('error', (err) => {
+        fastify.log.error({ err }, 'WebSocket client error');
+        wsClients.delete(ws);
+      });
+
+      // Heartbeat ping every 30s to keep NAT/proxy connections alive
+      const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.ping();
+        } else {
+          clearInterval(pingInterval);
+        }
+      }, 30_000);
+    });
+
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

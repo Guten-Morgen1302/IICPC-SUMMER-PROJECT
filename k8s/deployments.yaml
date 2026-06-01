@@ -1,0 +1,488 @@
+# ═══════════════════════════════════════════════════════════════════
+# IICPC Platform — Kubernetes Deployments
+# Apply after: namespace.yaml, configmap.yaml, services.yaml
+# ═══════════════════════════════════════════════════════════════════
+
+# ── Redis ────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: iicpc
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+# ── PostgreSQL ───────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: iicpc
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: iicpc-secrets
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: iicpc-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: iicpc-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: iicpc-secrets
+                  key: POSTGRES_DB
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "benchmark_user", "-d", "benchmark_db"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+---
+# ── Redpanda ─────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redpanda
+  namespace: iicpc
+  labels:
+    app: redpanda
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redpanda
+  template:
+    metadata:
+      labels:
+        app: redpanda
+    spec:
+      containers:
+        - name: redpanda
+          image: docker.redpanda.com/redpandadata/redpanda:v23.2.1
+          command:
+            - redpanda
+            - start
+            - --overprovisioned
+            - --smp
+            - "1"
+            - --memory
+            - 1G
+            - --reserve-memory
+            - 0M
+            - --node-id
+            - "0"
+            - --check=false
+            - --kafka-addr
+            - PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+            - --advertise-kafka-addr
+            - PLAINTEXT://redpanda-svc:29092,OUTSIDE://redpanda-svc:9092
+          ports:
+            - containerPort: 9092
+            - containerPort: 29092
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+---
+# ── QuestDB ──────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: questdb
+  namespace: iicpc
+  labels:
+    app: questdb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: questdb
+  template:
+    metadata:
+      labels:
+        app: questdb
+    spec:
+      containers:
+        - name: questdb
+          image: questdb/questdb:7.3.3
+          ports:
+            - containerPort: 9000
+            - containerPort: 9009
+            - containerPort: 8812
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+---
+# ── MinIO ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: iicpc
+  labels:
+    app: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: quay.io/minio/minio:latest
+          command: ["minio", "server", "/data", "--console-address", ":9001"]
+          ports:
+            - containerPort: 9000
+            - containerPort: 9001
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: iicpc-secrets
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: iicpc-secrets
+                  key: MINIO_SECRET_KEY
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+# ── submission-api ───────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: submission-api
+  namespace: iicpc
+  labels:
+    app: submission-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: submission-api
+  template:
+    metadata:
+      labels:
+        app: submission-api
+    spec:
+      containers:
+        - name: submission-api
+          image: iicpc/submission-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - configMapRef:
+                name: iicpc-config
+            - secretRef:
+                name: iicpc-secrets
+          env:
+            - name: PORT
+              value: "3001"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 5
+---
+# ── scoring-engine ───────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scoring-engine
+  namespace: iicpc
+  labels:
+    app: scoring-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scoring-engine
+  template:
+    metadata:
+      labels:
+        app: scoring-engine
+    spec:
+      containers:
+        - name: scoring-engine
+          image: iicpc/scoring-engine:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3007
+          envFrom:
+            - configMapRef:
+                name: iicpc-config
+            - secretRef:
+                name: iicpc-secrets
+          env:
+            - name: PORT
+              value: "3007"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3007
+            initialDelaySeconds: 10
+            periodSeconds: 5
+---
+# ── leaderboard-api ──────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: leaderboard-api
+  namespace: iicpc
+  labels:
+    app: leaderboard-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: leaderboard-api
+  template:
+    metadata:
+      labels:
+        app: leaderboard-api
+    spec:
+      containers:
+        - name: leaderboard-api
+          image: iicpc/leaderboard-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3008
+          envFrom:
+            - configMapRef:
+                name: iicpc-config
+            - secretRef:
+                name: iicpc-secrets
+          env:
+            - name: PORT
+              value: "3008"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3008
+            initialDelaySeconds: 10
+            periodSeconds: 5
+---
+# ── telemetry-ingestor ───────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telemetry-ingestor
+  namespace: iicpc
+  labels:
+    app: telemetry-ingestor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: telemetry-ingestor
+  template:
+    metadata:
+      labels:
+        app: telemetry-ingestor
+    spec:
+      containers:
+        - name: telemetry-ingestor
+          image: iicpc/telemetry-ingestor:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3005
+          envFrom:
+            - configMapRef:
+                name: iicpc-config
+            - secretRef:
+                name: iicpc-secrets
+          env:
+            - name: PORT
+              value: "3005"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+# ── correctness-engine ───────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: correctness-engine
+  namespace: iicpc
+  labels:
+    app: correctness-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: correctness-engine
+  template:
+    metadata:
+      labels:
+        app: correctness-engine
+    spec:
+      containers:
+        - name: correctness-engine
+          image: iicpc/correctness-engine:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3006
+          envFrom:
+            - configMapRef:
+                name: iicpc-config
+            - secretRef:
+                name: iicpc-secrets
+          env:
+            - name: PORT
+              value: "3006"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+# ── build-runner ─────────────────────────────────────────────────────
+# Needs Docker socket access to build contestant images
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: build-runner
+  namespace: iicpc
+  labels:
+    app: build-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: build-runner
+  template:
+    metadata:
+      labels:
+        app: build-runner
+    spec:
+      containers:
+        - name: build-runner
+          image: iicpc/build-runner:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3002
+          envFrom:
+            - configMapRef:
+                name: iicpc-config
+            - secretRef:
+                name: iicpc-secrets
+          env:
+            - name: PORT
+              value: "3002"
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
