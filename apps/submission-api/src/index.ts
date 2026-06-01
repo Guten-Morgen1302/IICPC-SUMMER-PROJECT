@@ -10,6 +10,8 @@ import { storeSubmissionArtifact } from './storage';
 import { Queue } from 'bullmq';
 import { QUEUES, BuildJobPayload } from '@benchmark/shared-types';
 import Redis from 'ioredis';
+import { validateArchive } from './archive-validator';
+
 
 // Helper to safely convert dates to ISO string
 function toISOString(date: any): string | null {
@@ -221,6 +223,15 @@ fastify.post('/submit', async (request, reply) => {
   const buffered: Buffer = (fileStream as any)._buffered;
   if (!buffered || buffered.length === 0) {
     return reply.status(400).send({ error: 'Uploaded file is empty' });
+  }
+
+  // ── 3.1 Validate Archive Content ──────────────────────────────────────────
+  const validation = validateArchive(buffered);
+  if (!validation.isValid) {
+    fastify.log.warn({ error: validation.error, filename: originalFilename }, 'Archive validation failed');
+    return reply.status(400).send({ 
+      error: `Archive validation failed: ${validation.error}` 
+    });
   }
 
   // ── 4. Resolve User ───────────────────────────────────────────────────

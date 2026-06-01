@@ -179,6 +179,32 @@ Start all services in development mode:
 pnpm dev
 ```
 
+### 3.1 Hardened Security with gVisor (Optional but Recommended)
+For production environments, the Arena isolates contestant matching engines using **gVisor (runsc)**:
+1. Install the `runsc` runtime on your Linux host:
+   ```bash
+   sudo apt-get update && sudo apt-get install -y runsc
+   ```
+2. Configure Docker to recognize the gVisor runtime in `/etc/docker/daemon.json`:
+   ```json
+   {
+     "runtimes": {
+       "runsc": {
+         "path": "runsc"
+       }
+     }
+   }
+   ```
+3. Restart Docker:
+   ```bash
+   sudo systemctl restart docker
+   ```
+4. Enable gVisor in the Arena by setting `DOCKER_RUNTIME=runsc` in your `.env` file, or run the secure docker-compose configuration:
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.secure.yml up -d
+   ```
+
+
 ### 4. Trigger a Benchmark
 1. Navigate to `http://localhost:5173/upload`.
 2. Upload `sample-engine.zip`.
