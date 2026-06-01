@@ -25,6 +25,38 @@ function toISOString(date: any): string | null {
 function computePipelineState(submission: any, benchmarkRuns: any[] = []) {
   try {
     const run = benchmarkRuns.length > 0 ? benchmarkRuns[0] : null;
+    const buildStatus = submission.buildJobs?.[0]?.status;
+    const runStatus = run?.status;
+
+    const buildStepStatus =
+      buildStatus === 'SUCCESS'
+        ? 'DONE'
+        : buildStatus === 'FAILED'
+          ? 'FAILED'
+          : buildStatus === 'IN_PROGRESS'
+            ? 'IN_PROGRESS'
+            : 'PENDING';
+
+    const sandboxStepStatus =
+      runStatus === 'FAILED'
+        ? 'FAILED'
+        : runStatus === 'READY' || runStatus === 'BENCHMARKING' || runStatus === 'EVALUATED' || runStatus === 'SUCCESS' || runStatus === 'STOPPED'
+          ? 'DONE'
+          : runStatus === 'IN_PROGRESS'
+            ? 'IN_PROGRESS'
+            : 'PENDING';
+
+    const benchmarkStepStatus =
+      runStatus === 'FAILED'
+        ? 'FAILED'
+        : runStatus === 'BENCHMARKING'
+          ? 'IN_PROGRESS'
+          : run?.benchmarkCompletedAt || runStatus === 'EVALUATED' || runStatus === 'SUCCESS' || runStatus === 'STOPPED'
+            ? 'DONE'
+            : 'PENDING';
+
+    const submissionFailed = submission.status === 'FAILED' || runStatus === 'FAILED' || buildStatus === 'FAILED';
+    const submissionCompleted = submission.status === 'COMPLETED' || runStatus === 'EVALUATED';
     
     const steps = [
       {
@@ -37,9 +69,7 @@ function computePipelineState(submission: any, benchmarkRuns: any[] = []) {
       },
       {
         name: 'BUILDING_IMAGE',
-        status: submission.buildJobs && submission.buildJobs.length > 0 
-          ? (submission.buildJobs[0]?.status === 'COMPLETED' ? 'DONE' : submission.buildJobs[0]?.status === 'FAILED' ? 'FAILED' : 'IN_PROGRESS')
-          : 'PENDING',
+        status: buildStepStatus,
         message: 'Building Docker image',
         startedAt: toISOString(submission.buildJobs?.[0]?.createdAt) || null,
         completedAt: toISOString(submission.buildJobs?.[0]?.completedAt) || null,
@@ -47,7 +77,7 @@ function computePipelineState(submission: any, benchmarkRuns: any[] = []) {
       },
       {
         name: 'STARTING_SANDBOX',
-        status: run?.status === 'COMPLETED' || run?.status === 'RUNNING' ? 'DONE' : run ? 'IN_PROGRESS' : 'PENDING',
+        status: sandboxStepStatus,
         message: 'Starting sandbox container',
         startedAt: toISOString(run?.createdAt) || null,
         completedAt: null,
@@ -55,15 +85,15 @@ function computePipelineState(submission: any, benchmarkRuns: any[] = []) {
       },
       {
         name: 'RUNNING_BENCHMARK',
-        status: run?.status === 'COMPLETED' ? 'DONE' : run?.status === 'RUNNING' ? 'IN_PROGRESS' : 'PENDING',
-        message: 'Running benchmark load test',
+        status: benchmarkStepStatus,
+        message: run?.benchmarkErrorMessage || 'Running benchmark load test',
         startedAt: toISOString(run?.createdAt) || null,
         completedAt: null,
         data: {}
       },
       {
         name: 'EVALUATING_CORRECTNESS',
-        status: submission.status === 'COMPLETED' ? 'DONE' : submission.status === 'FAILED' ? 'FAILED' : 'PENDING',
+        status: submissionCompleted ? 'DONE' : submissionFailed ? 'FAILED' : 'PENDING',
         message: 'Evaluating correctness',
         startedAt: null,
         completedAt: null,
@@ -71,7 +101,7 @@ function computePipelineState(submission: any, benchmarkRuns: any[] = []) {
       },
       {
         name: 'COMPUTING_SCORE',
-        status: submission.status === 'COMPLETED' ? 'DONE' : 'PENDING',
+        status: submissionCompleted ? 'DONE' : submissionFailed ? 'FAILED' : 'PENDING',
         message: 'Computing composite score',
         startedAt: null,
         completedAt: null,
@@ -79,7 +109,7 @@ function computePipelineState(submission: any, benchmarkRuns: any[] = []) {
       },
       {
         name: 'LEADERBOARD_UPDATED',
-        status: submission.status === 'COMPLETED' ? 'DONE' : 'PENDING',
+        status: submissionCompleted ? 'DONE' : submissionFailed ? 'FAILED' : 'PENDING',
         message: 'Leaderboard updated',
         startedAt: null,
         completedAt: null,
@@ -87,15 +117,15 @@ function computePipelineState(submission: any, benchmarkRuns: any[] = []) {
       },
       {
         name: 'COMPLETE',
-        status: submission.status === 'COMPLETED' ? 'DONE' : submission.status === 'FAILED' ? 'FAILED' : 'PENDING',
-        message: submission.status === 'FAILED' ? 'Pipeline failed' : submission.status === 'COMPLETED' ? 'Pipeline completed' : 'Waiting for completion',
+        status: submissionCompleted ? 'DONE' : submissionFailed ? 'FAILED' : 'PENDING',
+        message: submissionFailed ? 'Pipeline failed' : submissionCompleted ? 'Pipeline completed' : 'Waiting for completion',
         startedAt: null,
-        completedAt: submission.status === 'COMPLETED' ? new Date().toISOString() : null,
+        completedAt: submissionCompleted || submissionFailed ? new Date().toISOString() : null,
         data: {}
       }
     ];
 
-    const submissionStatus = submission.status === 'COMPLETED' ? 'COMPLETED' : submission.status === 'FAILED' ? 'FAILED' : 'RUNNING';
+    const submissionStatus = submissionCompleted ? 'COMPLETED' : submissionFailed ? 'FAILED' : 'RUNNING';
     
     return {
       submissionId: submission.id,
