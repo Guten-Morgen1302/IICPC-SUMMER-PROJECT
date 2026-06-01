@@ -1,0 +1,47 @@
+# ── ConfigMap: shared platform environment variables ─────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: iicpc-config
+  namespace: iicpc
+data:
+  # Service URLs (in-cluster DNS)
+  REDIS_URL: "redis://redis-svc:6379"
+  DATABASE_URL: "postgresql://benchmark_user:benchmark_pass@postgres-svc:5432/benchmark_db"
+  MINIO_ENDPOINT: "minio-svc"
+  MINIO_PORT: "9000"
+  MINIO_USE_SSL: "false"
+  MINIO_BUCKET: "submissions"
+  QUESTDB_HOST: "questdb-svc"
+  QUESTDB_ILP_PORT: "9009"
+  QUESTDB_HTTP_PORT: "9000"
+  REDPANDA_BROKERS: "redpanda-svc:9092"
+  # Service ports
+  SUBMISSION_API_PORT: "3001"
+  BUILD_RUNNER_PORT: "3002"
+  SANDBOX_MANAGER_PORT: "3003"
+  LOAD_GENERATOR_CONTROLLER_PORT: "3004"
+  TELEMETRY_INGESTOR_PORT: "3005"
+  CORRECTNESS_ENGINE_PORT: "3006"
+  SCORING_ENGINE_PORT: "3007"
+  LEADERBOARD_API_PORT: "3008"
+  # Scoring thresholds (tunable without redeploy)
+  LATENCY_FLOOR_MS: "10"
+  LATENCY_CEILING_MS: "100"
+  THROUGHPUT_TARGET_TPS: "10000"
+  CORRECTNESS_GATE: "0.5"
+---
+# ── Secret: sensitive credentials ────────────────────────────────────
+# In production replace these values with sealed-secrets or vault.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: iicpc-secrets
+  namespace: iicpc
+type: Opaque
+stringData:
+  POSTGRES_USER: "benchmark_user"
+  POSTGRES_PASSWORD: "benchmark_pass"
+  POSTGRES_DB: "benchmark_db"
+  MINIO_ACCESS_KEY: "minioadmin"
+  MINIO_SECRET_KEY: "minioadmin"

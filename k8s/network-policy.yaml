@@ -1,0 +1,80 @@
+# ── NetworkPolicy: deny all ingress/egress in contestant namespace ───
+# Contestants cannot reach the platform services or the internet.
+# Only traffic FROM the load-generator (iicpc namespace) is allowed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: contestant-isolation
+  namespace: iicpc-contestants
+spec:
+  podSelector: {}           # applies to ALL pods in this namespace
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Allow inbound only from the iicpc namespace (load-generator pods)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: iicpc
+          podSelector:
+            matchLabels:
+              app: load-generator
+
+  egress:
+    # Block all outbound — contestant engines must not phone home
+    []
+---
+# ── NetworkPolicy: load-generator can reach contestant pods ─────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-load-generator-egress
+  namespace: iicpc
+spec:
+  podSelector:
+    matchLabels:
+      app: load-generator
+  policyTypes:
+    - Egress
+  egress:
+    # Can reach contestant namespace
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: iicpc-contestants
+    # Can reach Redis, QuestDB, Redpanda inside iicpc namespace
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: iicpc
+      ports:
+        - port: 6379   # Redis
+        - port: 9092   # Redpanda
+        - port: 9009   # QuestDB ILP
+---
+# ── NetworkPolicy: platform services default deny from outside ───────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: platform-internal-only
+  namespace: iicpc
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow intra-namespace traffic (services calling each other)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: iicpc
+    # Allow from host (for external submission API on NodePort)
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 3001   # submission-api (public)
+        - port: 3008   # leaderboard-api (public)
+        - port: 80     # web frontend

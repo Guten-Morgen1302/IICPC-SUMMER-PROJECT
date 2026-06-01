@@ -1,0 +1,17 @@
+# ── Namespace: iicpc (platform services) ────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: iicpc
+  labels:
+    app.kubernetes.io/managed-by: iicpc-platform
+    environment: competition
+---
+# ── Namespace: iicpc-contestants (sandboxed contestant engines) ──────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: iicpc-contestants
+  labels:
+    app.kubernetes.io/managed-by: iicpc-platform
+    purpose: contestant-isolation

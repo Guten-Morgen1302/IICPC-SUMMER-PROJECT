@@ -115,8 +115,7 @@ export function LandingPage() {
               Upload your trading engine, run a distributed benchmark with real order flow — buys, sells, cancels — and see exactly how it ranks on a live leaderboard.
             </p>
             <div className="hero-cta">
-              <Link to="/app" className="btn btn-primary">Launch Dashboard <ChevronRight size={18} /></Link>
-              <Link to="/leaderboard" className="btn btn-ghost">View Live Leaderboard</Link>
+              <Link to="/leaderboard" className="btn btn-primary">View Live Leaderboard <ChevronRight size={18} /></Link>
             </div>
           </motion.div>
           

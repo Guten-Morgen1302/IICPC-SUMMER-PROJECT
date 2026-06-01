@@ -63,6 +63,8 @@ export function SubmissionDetailPage() {
   if (!data) return <div className="loading">Compiling performance dossier…</div>
 
   const latestRun = data.benchmarkRuns[data.benchmarkRuns.length - 1] ?? null
+  const buildCount = data.buildJobs.length
+  const runCount = data.benchmarkRuns.length
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
@@ -82,11 +84,11 @@ export function SubmissionDetailPage() {
         <div style={{ display: 'flex', gap: '1rem' }}>
           <div className="glass-card" style={{ padding: '0.75rem 1.25rem', textAlign: 'center' }}>
             <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Builds</div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 800 }}>{data.buildCount}</div>
+            <div style={{ fontSize: '1.2rem', fontWeight: 800 }}>{buildCount}</div>
           </div>
           <div className="glass-card" style={{ padding: '0.75rem 1.25rem', textAlign: 'center' }}>
             <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Runs</div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 800 }}>{data.runCount}</div>
+            <div style={{ fontSize: '1.2rem', fontWeight: 800 }}>{runCount}</div>
           </div>
         </div>
       </div>

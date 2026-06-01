@@ -88,6 +88,7 @@ function httpGet(url: string): Promise<{ status: number; body: string }> {
     'test-sandbox-run',
     srcDir,
     manifest,
+    null,
     logger,
     { ...DEFAULT_LIMITS, readinessTimeoutMs: 30_000 }
   );

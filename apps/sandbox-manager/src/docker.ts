@@ -123,6 +123,8 @@ export async function launchSandbox(
   const args = [
     'create',
     `--name ${containerName}`,
+    // Optional gVisor runtime override (e.g. runsc)
+    process.env.DOCKER_RUNTIME ? `--runtime=${process.env.DOCKER_RUNTIME}` : '',
     // Resource limits
     `--cpus=${limits.cpus}`,
     limits.cpusetCpus ? `--cpuset-cpus=${limits.cpusetCpus}` : '',

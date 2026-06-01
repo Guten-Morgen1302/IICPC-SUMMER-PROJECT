@@ -58,33 +58,36 @@ services:
     profiles:
       - network-setup
 
-  # Template for contestant services (will be spun up dynamically)
-  # contestant-service-template:
-  #   image: ${CONTESTANT_IMAGE}  # Dynamically provided
-  #   runtime: runc  # Will be replaced with runsc for gVisor
-  #   cap_drop:
-  #     - ALL
-  #   cap_add:
-  #     - NET_BIND_SERVICE  # Only allow network binding
-  #   security_opt:
-  #     - no-new-privileges:true
-  #     - seccomp=unconfined  # TODO: use custom seccomp profile
-  #   mem_limit: 512m
-  #   memswap_limit: 512m
-  #   cpus: 1.0
-  #   cpuset: "0"  # Pin to CPU 0
-  #   pids_limit: 200
-  #   read_only: true
-  #   tmpfs:
-  #     - /tmp:size=100m,noexec
-  #     - /run:size=100m,noexec
-  #   networks:
-  #     - contestant-isolated
-  #   logging:
-  #     driver: json-file
-  #     options:
-  #       max-size: "10m"
-  #       max-file: "3"
+  # Template for contestant services (will be spun up dynamically in production)
+  # To run this, ensure gVisor (runsc) is installed on your host:
+  #   sudo apt-get update && sudo apt-get install -y runsc
+  # And configured in /etc/docker/daemon.json.
+  contestant-service-template:
+    image: ${CONTESTANT_IMAGE:-contestant-default:latest}
+    runtime: runsc  # Hardened sandbox using gVisor kernel isolation
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE  # Only allow network binding
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=unconfined  # Confined by gVisor instead of standard Docker seccomp
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.0
+    cpuset: "0"  # Pin to CPU 0
+    pids_limit: 200
+    read_only: true
+    tmpfs:
+      - /tmp:size=100m,noexec
+      - /run:size=100m,noexec
+    networks:
+      - contestant-isolated
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   contestant-isolated:

@@ -1,0 +1,53 @@
+# ── ResourceQuota: cap contestant namespace resource usage ───────────
+# Prevents a single contestant from starving the cluster.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: contestant-quota
+  namespace: iicpc-contestants
+spec:
+  hard:
+    pods: "50"                        # max 50 pods across all contestants
+    requests.cpu: "20"                # total CPU request across namespace
+    limits.cpu: "40"                  # total CPU limit
+    requests.memory: 20Gi            # total memory request
+    limits.memory: 40Gi              # total memory limit
+    persistentvolumeclaims: "0"      # no PVCs — contestants are stateless
+    services.nodeports: "0"          # no NodePorts from contestant pods
+---
+# ── LimitRange: per-container floor/ceiling in contestant namespace ──
+# Even if ResourceQuota has headroom, each container is bounded.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: contestant-limits
+  namespace: iicpc-contestants
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "1"
+        memory: 512Mi
+      defaultRequest:
+        cpu: 250m
+        memory: 128Mi
+      max:
+        cpu: "2"          # hard cap: 2 vCPU per container
+        memory: 1Gi       # hard cap: 1 GB per container
+      min:
+        cpu: 50m
+        memory: 32Mi
+---
+# ── ResourceQuota: platform namespace (iicpc) ───────────────────────
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: platform-quota
+  namespace: iicpc
+spec:
+  hard:
+    pods: "100"
+    requests.cpu: "40"
+    limits.cpu: "80"
+    requests.memory: 40Gi
+    limits.memory: 80Gi

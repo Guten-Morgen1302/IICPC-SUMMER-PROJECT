@@ -136,6 +136,8 @@ function InspectionDrawer({ submissionId, onClose }: { submissionId: string, onC
     api.getSubmission(submissionId).then(setData)
   }, [submissionId])
 
+  const firstRun = data?.benchmarkRuns?.[0] ?? null
+
   return (
     <motion.div
       initial={{ x: '100%' }}
@@ -168,8 +170,8 @@ function InspectionDrawer({ submissionId, onClose }: { submissionId: string, onC
             <div className="glass-card" style={{ padding: '1.25rem', background: 'var(--surface-2)' }}>
               <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>SUCCESS RATE</div>
               <div className="mono" style={{ fontSize: '1.5rem', fontWeight: 900 }}>
-                {data.benchmarkRuns[0]?.successCount !== undefined && data.benchmarkRuns[0]?.failureCount !== undefined 
-                  ? `${((data.benchmarkRuns[0].successCount / (data.benchmarkRuns[0].successCount + data.benchmarkRuns[0].failureCount)) * 100).toFixed(0)}%`
+                {firstRun?.successCount !== undefined && firstRun?.failureCount !== undefined 
+                  ? `${((firstRun.successCount / (firstRun.successCount + firstRun.failureCount)) * 100).toFixed(0)}%`
                   : '—'}
               </div>
             </div>
@@ -217,12 +219,57 @@ export function LeaderboardPage() {
   const [overview, setOverview] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [wsConnected, setWsConnected] = useState(false)
 
+  // Initial REST load
   useEffect(() => {
     Promise.all([
       api.getLeaderboard().then(setRows),
       api.getOverview?.().then(setOverview).catch(() => {})
     ]).finally(() => setLoading(false))
+  }, [])
+
+  // Live WebSocket updates
+  useEffect(() => {
+    const WS_URL = (import.meta.env.VITE_LEADERBOARD_WS_URL as string) ||
+      `ws://${window.location.hostname}:3008`
+    let ws: WebSocket | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout>
+
+    const connect = () => {
+      ws = new WebSocket(WS_URL)
+
+      ws.onopen = () => {
+        setWsConnected(true)
+        console.info('[WS] Leaderboard live feed connected')
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data as string)
+          if (msg.type === 'LEADERBOARD_UPDATE' && Array.isArray(msg.data)) {
+            setRows(msg.data as LeaderboardRow[])
+          }
+        } catch {/* ignore malformed frames */}
+      }
+
+      ws.onclose = () => {
+        setWsConnected(false)
+        console.warn('[WS] Disconnected — reconnecting in 5s')
+        reconnectTimer = setTimeout(connect, 5_000)
+      }
+
+      ws.onerror = () => {
+        ws?.close()
+      }
+    }
+
+    connect()
+
+    return () => {
+      clearTimeout(reconnectTimer)
+      ws?.close()
+    }
   }, [])
 
   if (loading) return <div className="loading">Synchronizing Arena Data...</div>
@@ -247,8 +294,9 @@ export function LeaderboardPage() {
         <div>
           <h1 className="page-title" style={{ fontSize: '4rem', marginBottom: '0.5rem', letterSpacing: '-0.05em' }}>ARENA STANDINGS</h1>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--success)', fontSize: '0.8rem', fontWeight: 800 }}>
-              <div className="terminal-blink" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--success)' }} /> LIVE_UPLINK_ACTIVE
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: wsConnected ? 'var(--success)' : 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 800 }}>
+              <div className="terminal-blink" style={{ width: 8, height: 8, borderRadius: '50%', background: wsConnected ? 'var(--success)' : 'var(--text-muted)' }} />
+              {wsConnected ? 'LIVE_UPLINK_ACTIVE' : 'CONNECTING...'}
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>| {overview?.totalSubmissions ?? rows.length} total submissions processed</div>
           </div>
