@@ -56,6 +56,16 @@ function ServiceHealthItem({ name, status }: { name: string, status: 'ok' | 'err
 export function OverviewPage() {
   const [data, setData] = useState<OverviewData | null>(null)
   const [recentRuns, setRecentRuns] = useState<RunSummary[]>([])
+  const [healthStatus, setHealthStatus] = useState<Record<string, 'ok' | 'error' | 'loading'>>({
+    'submission-api': 'loading',
+    'build-runner': 'loading',
+    'sandbox-manager': 'loading',
+    'load-generator': 'loading',
+    'telemetry-ingestor': 'loading',
+    'correctness-engine': 'loading',
+    'scoring-engine': 'loading',
+    'leaderboard-api': 'loading'
+  })
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -66,6 +76,24 @@ export function OverviewPage() {
       setData(overview)
       setRecentRuns(runs.slice(0, 5))
     }).catch(console.error).finally(() => setLoading(false))
+
+    // Fetch health status
+    const services = [
+      { name: 'submission-api', port: 3001 },
+      { name: 'build-runner', port: 3002 },
+      { name: 'sandbox-manager', port: 3003 },
+      { name: 'load-generator', port: 3004 },
+      { name: 'telemetry-ingestor', port: 3005 },
+      { name: 'correctness-engine', port: 3006 },
+      { name: 'scoring-engine', port: 3007 },
+      { name: 'leaderboard-api', port: 3008 }
+    ]
+
+    services.forEach(svc => {
+      fetch(`http://localhost:${svc.port}/health`)
+        .then(r => setHealthStatus(prev => ({ ...prev, [svc.name]: r.ok ? 'ok' : 'error' })))
+        .catch(() => setHealthStatus(prev => ({ ...prev, [svc.name]: 'error' })))
+    })
   }, [])
 
   if (loading) return <div className="loading">Initializing systems...</div>
@@ -147,21 +175,32 @@ export function OverviewPage() {
             <span>Grid Services</span>
           </div>
           <div className="section-body">
-            <ServiceHealthItem name="Submission API" status="ok" />
-            <ServiceHealthItem name="Build Runner" status="ok" />
-            <ServiceHealthItem name="Sandbox Manager" status="ok" />
-            <ServiceHealthItem name="Telemetry Ingestor" status="ok" />
-            <ServiceHealthItem name="Scoring Engine" status="ok" />
-            <ServiceHealthItem name="Leaderboard API" status="ok" />
+            <ServiceHealthItem name="Submission API" status={healthStatus['submission-api']} />
+            <ServiceHealthItem name="Build Runner" status={healthStatus['build-runner']} />
+            <ServiceHealthItem name="Sandbox Manager" status={healthStatus['sandbox-manager']} />
+            <ServiceHealthItem name="Load Generator" status={healthStatus['load-generator']} />
+            <ServiceHealthItem name="Telemetry Ingestor" status={healthStatus['telemetry-ingestor']} />
+            <ServiceHealthItem name="Correctness Engine" status={healthStatus['correctness-engine']} />
+            <ServiceHealthItem name="Scoring Engine" status={healthStatus['scoring-engine']} />
+            <ServiceHealthItem name="Leaderboard API" status={healthStatus['leaderboard-api']} />
             
             <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--surface-3)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', gap: '0.5rem', color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
                 <Clock size={14} />
                 <span>Last heartbeat: Just now</span>
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', color: 'var(--success)', fontSize: '0.75rem' }}>
-                <CheckCircle2 size={14} />
-                <span>All systems operational</span>
+              <div style={{ display: 'flex', gap: '0.5rem', color: Object.values(healthStatus).every(s => s === 'ok') ? 'var(--success)' : 'var(--error)', fontSize: '0.75rem' }}>
+                {Object.values(healthStatus).every(s => s === 'ok') ? (
+                  <>
+                    <CheckCircle2 size={14} />
+                    <span>All systems operational</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle size={14} />
+                    <span>Some systems degraded</span>
+                  </>
+                )}
               </div>
             </div>
           </div>

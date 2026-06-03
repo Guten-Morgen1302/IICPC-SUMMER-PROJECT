@@ -246,13 +246,14 @@ export function UploadPage() {
             <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
               Ensure your <code>.zip</code> or <code>.tar.gz</code> archive contains the <code>benchmark.manifest.json</code> at the root.
             </p>
-            <button 
+            <a 
               className="btn btn-ghost" 
-              style={{ width: '100%', fontSize: '0.7rem', border: '1px solid var(--border)', borderRadius: '8px' }}
-              onClick={() => alert('Starter template download initiated...')}
+              style={{ width: '100%', fontSize: '0.7rem', border: '1px solid var(--border)', borderRadius: '8px', display: 'flex', justifyContent: 'center', alignItems: 'center', textDecoration: 'none' }}
+              href="/sample-engine.zip"
+              download
             >
               DOWNLOAD STARTER TEMPLATE
-            </button>
+            </a>
           </div>
 
           <div className="glass-card" style={{ padding: '1.5rem', background: 'rgba(0,0,0,0.2)' }}>

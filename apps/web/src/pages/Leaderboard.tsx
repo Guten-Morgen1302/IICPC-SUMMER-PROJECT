@@ -116,12 +116,12 @@ function PodiumCard({ row, rank, onClick }: { row: LeaderboardRow, rank: number,
           <div>
             <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>p99</div>
             <div className="mono" style={{ fontSize: '1rem', fontWeight: 700 }}>{row.p99Ms.toFixed(2)}ms</div>
-            <div style={{ marginTop: '0.5rem' }}><Sparkline data={[5, 7, 4, 8, 3, 6, 4]} color={color} height={20} /></div>
+            <div style={{ marginTop: '0.5rem' }}><Sparkline data={[row.p99Ms*1.1, row.p99Ms*0.9, row.p99Ms*1.05, row.p99Ms*0.95, row.p99Ms]} color={color} height={20} /></div>
           </div>
           <div>
             <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>TPS</div>
             <div className="mono" style={{ fontSize: '1rem', fontWeight: 700 }}>{row.throughput.toFixed(0)}</div>
-            <div style={{ marginTop: '0.5rem' }}><Sparkline data={[10, 15, 12, 18, 20, 17, 22]} color={color} height={20} /></div>
+            <div style={{ marginTop: '0.5rem' }}><Sparkline data={[row.throughput*0.9, row.throughput*1.1, row.throughput*0.95, row.throughput*1.05, row.throughput]} color={color} height={20} /></div>
           </div>
         </div>
       </div>
@@ -357,7 +357,7 @@ export function LeaderboardPage() {
                         </div>
                       </div>
                     </td>
-                    <td><Sparkline data={[4, 5, 3, 4, 6, 5, 4]} color="var(--accent-2)" height={20} width={80} /></td>
+                    <td><Sparkline data={[row.p99Ms*1.1, row.p99Ms*0.9, row.p99Ms*1.05, row.p99Ms*0.95, row.p99Ms]} color="var(--accent-2)" height={20} width={80} /></td>
                     <td style={{ textAlign: 'right' }} className="mono">{row.throughput.toFixed(0)} <span style={{ fontSize: '0.6rem', opacity: 0.5 }}>RPS</span></td>
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '1rem' }}>

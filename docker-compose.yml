@@ -65,8 +65,12 @@ services:
     environment:
       - PORT=3001
       - DATABASE_URL=postgresql://${POSTGRES_USER:-benchmark_user}:${POSTGRES_PASSWORD:-benchmark_pass}@postgres:5432/${POSTGRES_DB:-benchmark_db}
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=redpanda:29092
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   build-runner:
@@ -79,8 +83,15 @@ services:
       - "3002:3002"
     environment:
       - PORT=3002
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-benchmark_user}:${POSTGRES_PASSWORD:-benchmark_pass}@postgres:5432/${POSTGRES_DB:-benchmark_db}
+      - REDIS_URL=redis://redis:6379
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   sandbox-manager:
     build: 
@@ -92,11 +103,18 @@ services:
       - "3003:3003"
     environment:
       - PORT=3003
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-benchmark_user}:${POSTGRES_PASSWORD:-benchmark_pass}@postgres:5432/${POSTGRES_DB:-benchmark_db}
+      - REDIS_URL=redis://redis:6379
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - default
       - contestant-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   load-generator-controller:
     build: 
@@ -108,9 +126,18 @@ services:
       - "3004:3004"
     environment:
       - PORT=3004
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-benchmark_user}:${POSTGRES_PASSWORD:-benchmark_pass}@postgres:5432/${POSTGRES_DB:-benchmark_db}
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=redpanda:29092
+      - QUESTDB_URL=http://questdb:9000
     networks:
       - default
       - contestant-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   telemetry-ingestor:
     build: 
@@ -122,6 +149,13 @@ services:
       - "3005:3005"
     environment:
       - PORT=3005
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-benchmark_user}:${POSTGRES_PASSWORD:-benchmark_pass}@postgres:5432/${POSTGRES_DB:-benchmark_db}
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=redpanda:29092
+      - QUESTDB_URL=http://questdb:9000
+    depends_on:
+      redis:
+        condition: service_healthy
 
   correctness-engine:
     build: 
@@ -133,6 +167,14 @@ services:
       - "3006:3006"
     environment:
       - PORT=3006
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-benchmark_user}:${POSTGRES_PASSWORD:-benchmark_pass}@postgres:5432/${POSTGRES_DB:-benchmark_db}
+      - REDIS_URL=redis://redis:6379
+      - QUESTDB_URL=http://questdb:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   scoring-engine:
     build: 
@@ -144,6 +186,14 @@ services:
       - "3007:3007"
     environment:
       - PORT=3007
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-benchmark_user}:${POSTGRES_PASSWORD:-benchmark_pass}@postgres:5432/${POSTGRES_DB:-benchmark_db}
+      - REDIS_URL=redis://redis:6379
+      - QUESTDB_URL=http://questdb:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   leaderboard-api:
     build: 
@@ -156,8 +206,11 @@ services:
     environment:
       - PORT=3008
       - DATABASE_URL=postgresql://${POSTGRES_USER:-benchmark_user}:${POSTGRES_PASSWORD:-benchmark_pass}@postgres:5432/${POSTGRES_DB:-benchmark_db}
+      - REDIS_URL=redis://redis:6379
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
 volumes:

@@ -197,6 +197,8 @@ fastify.get('/health', async (_request, _reply) => {
  *
  * NOTE(future): userEmail will be replaced by a real auth token in a later phase.
  */
+const rateLimitMap = new Map<string, { count: number, resetAt: number }>();
+
 fastify.post('/submit', async (request, reply) => {
   let rawEmail: string | undefined;
   let fileStream: ReturnType<typeof request.file> extends Promise<infer T> ? T : never;
@@ -234,7 +236,7 @@ fastify.post('/submit', async (request, reply) => {
     return reply.status(400).send({ error: 'Invalid multipart request' });
   }
 
-  // ── 2. Validate email ─────────────────────────────────────────────────
+  // ── 2. Validate email & Rate Limit ─────────────────────────────────────────────────
   if (!rawEmail || rawEmail.trim() === '') {
     return reply.status(400).send({ error: 'userEmail field is required' });
   }
@@ -243,6 +245,19 @@ fastify.post('/submit', async (request, reply) => {
 
   if (!isValidEmail(email)) {
     return reply.status(400).send({ error: 'userEmail must be a valid email address' });
+  }
+
+  const now = Date.now();
+  let rateLimit = rateLimitMap.get(email);
+  if (!rateLimit || now > rateLimit.resetAt) {
+    rateLimit = { count: 0, resetAt: now + 5 * 60 * 1000 }; // 5 minutes window
+  }
+  rateLimit.count++;
+  rateLimitMap.set(email, rateLimit);
+
+  if (rateLimit.count > 3) {
+    fastify.log.warn(`Rate limit exceeded for ${email}`);
+    return reply.status(429).send({ error: 'Rate limit exceeded. Max 3 submissions per 5 minutes.' });
   }
 
   // ── 3. Validate file ──────────────────────────────────────────────────

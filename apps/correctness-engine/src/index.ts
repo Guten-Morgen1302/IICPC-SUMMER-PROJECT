@@ -69,10 +69,11 @@ function validateTimeInForceCompliance(fills: Fill[]): Array<{ issue: string; de
     } else if (fill.tif === 'FOK') {
       // FOK must be ALL or NOTHING - any partial fill is a violation
       // For now, we mark it in violations but can be checked at order submission
-      if (fill.fillQuantity > 0 && fill.fillQuantity !== 100) { // Assuming submitted quantity is 100
+      const requested = (fill as any).requestedQuantity || 100;
+      if (fill.fillQuantity > 0 && fill.fillQuantity !== requested) {
         violations.push({
           issue: 'FOK_PARTIAL_FILL',
-          details: { orderId: fill.orderId, filledQuantity: fill.fillQuantity }
+          details: { orderId: fill.orderId, filledQuantity: fill.fillQuantity, requested }
         });
       }
     }
@@ -324,18 +325,13 @@ const worker = new Worker<CorrectnessJobPayload>(
         }
       });
       
-      await prisma.benchmarkRun.update({
-        where: { id: job.data.benchmarkRunId },
-        data: { status: 'EVALUATED' }
-      });
-
       // Enqueue to scoring queue
       await scoringQueue.add('compute-score', {
         submissionId: job.data.submissionId,
         benchmarkRunId: job.data.benchmarkRunId,
       });
 
-      return { status: 'EVALUATED' };
+      return { status: 'SUCCESS' };
     } catch (err) {
       fastify.log.error({ jobId: job.id, error: err }, 'Worker job handler error');
       throw err;

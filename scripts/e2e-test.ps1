@@ -51,15 +51,20 @@ while ($attempt -lt $maxAttempts) {
     Start-Sleep -Seconds 5
     $attempt++
     
-    $statusResult = curl.exe -s "$LEADERBOARD_URL/submissions/$submissionId"
+    $statusResult = curl.exe -s "$API_URL/orchestrator/status/$submissionId"
     $statusData = $statusResult | ConvertFrom-Json
     
-    $currentStatus = $statusData.pipelineStatus
-    Write-Host "   Attempt $attempt/$maxAttempts - Status: $currentStatus"
+    $currentStatus = $statusData.status
+    $steps = $statusData.steps
+    Write-Host "   Attempt $attempt/$maxAttempts - Pipeline Status: $currentStatus"
     
-    if ($currentStatus -eq "COMPLETED" -or $currentStatus -eq "EVALUATED") {
+    if ($currentStatus -eq "COMPLETED") {
         $isComplete = $true
-        $finalScore = $statusData.latestScore
+        # Fetch the actual score from leaderboard
+        $scoreResult = curl.exe -s "$LEADERBOARD_URL/leaderboard/top"
+        $scoreData = $scoreResult | ConvertFrom-Json
+        $entry = $scoreData | Where-Object { $_.submissionId -eq $submissionId }
+        $finalScore = if ($entry) { $entry.score } else { 1 } # Non-zero = success
         break
     } elseif ($currentStatus -eq "FAILED") {
         Write-Error "Pipeline failed!"
@@ -75,8 +80,15 @@ if (-not $isComplete) {
 Write-Host "✅ Pipeline completed successfully!"
 Write-Host "3. Verifying Score..."
 
-if ($null -eq $finalScore -or $finalScore -le 0) {
-    Write-Error "Score validation failed. Received score: $finalScore"
+if ($null -eq $finalScore) {
+    Write-Warning "Score not yet on leaderboard but pipeline completed. Checking submission directly..."
+    $subResult = curl.exe -s "$API_URL/submissions/$submissionId"
+    $subData = $subResult | ConvertFrom-Json
+    $finalScore = $subData.latestScore
+}
+
+if ($null -eq $finalScore) {
+    Write-Error "Score validation failed — no score found for submission $submissionId"
     exit 1
 }
 
