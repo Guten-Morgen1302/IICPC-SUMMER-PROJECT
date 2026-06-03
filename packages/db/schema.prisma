@@ -28,7 +28,8 @@ model Submission {
   mimeType         String?
   sizeBytes        BigInt?
   uploadedAt       DateTime?
-  // TODO(Phase 3): add checksum (sha256) column once hashing is integrated
+  // Phase 3: checksum (sha256) column for integrity
+  checksum         String?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   buildJobs        BuildJob[]
