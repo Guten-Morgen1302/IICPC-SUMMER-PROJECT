@@ -71,7 +71,8 @@ function validateTimeInForceCompliance(fills: Fill[]): Array<{ issue: string; de
       // For now, we mark it in violations but can be checked at order submission
       if (fill.fillQuantity > 0 && fill.fillQuantity !== 100) { // Assuming submitted quantity is 100
         violations.push({
-          issue: 'FOK_PARTIAL_FILL',\n          details: { orderId: fill.orderId, filledQuantity: fill.fillQuantity }
+          issue: 'FOK_PARTIAL_FILL',
+          details: { orderId: fill.orderId, filledQuantity: fill.fillQuantity }
         });
       }
     }

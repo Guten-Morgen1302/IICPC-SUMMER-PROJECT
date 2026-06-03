@@ -162,7 +162,48 @@ export interface PipelineState {
 export const api = {
   getOverview: () => get<OverviewData>('/overview'),
   getLeaderboard: () => get<LeaderboardRow[]>('/leaderboard/top'),
-  getRunScore: (id: string) => get<any>(`/runs/${id}/score`),
+  getRunScore: async (id: string) => {
+    // Prefer the dedicated score endpoint when available.
+    const scoreRes = await fetch(`${BASE}/runs/${id}/score`);
+    if (scoreRes.ok) {
+      return scoreRes.json();
+    }
+
+    // Some service variants expose only /runs/:id. Normalize that shape.
+    if (scoreRes.status !== 404) {
+      throw new Error(`API error: ${scoreRes.status}`);
+    }
+
+    const runRes = await fetch(`${BASE}/runs/${id}`);
+    if (!runRes.ok) {
+      throw new Error(`API error: ${runRes.status}`);
+    }
+
+    const run = await runRes.json() as any;
+    const score = run?.score;
+
+    let correctness = 0;
+    if (typeof score?.correctness === 'number') {
+      correctness = score.correctness;
+    } else if (typeof score?.correctnessMultiplier === 'number') {
+      correctness = score.correctnessMultiplier;
+    } else if (run?.correctnessStatus === 'PASS') {
+      correctness = 1;
+    } else if (run?.correctnessStatus === 'PASS_WITH_WARNINGS') {
+      correctness = 0.7;
+    }
+
+    return {
+      scoreValue: run?.scoreValue ?? score?.totalScore ?? 0,
+      metrics: {
+        p95Ms: run?.p95LatencyMs ?? score?.latency ?? 0,
+        p99Ms: run?.p99LatencyMs ?? 0,
+        throughput: run?.throughputRps ?? score?.throughput ?? 0,
+        correctness
+      },
+      run
+    };
+  },
   getSubmissions: () => get<SubmissionRow[]>('/submissions'),
   getSubmission: (id: string) => get<SubmissionDetail>(`/submissions/${id}`),
   getRuns: (status?: string) => get<RunSummary[]>(status ? `/runs?status=${status}` : '/runs'),
