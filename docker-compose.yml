@@ -110,8 +110,11 @@ services:
       - PORT=3003
       - DATABASE_URL=postgresql://${POSTGRES_USER:-benchmark_user}:${POSTGRES_PASSWORD:-benchmark_pass}@postgres:5432/${POSTGRES_DB:-benchmark_db}
       - REDIS_URL=redis://redis:6379
+      - SANDBOX_HOST=host.docker.internal
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - default
       - contestant-net
@@ -136,6 +139,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - KAFKA_BROKERS=redpanda:29092
       - QUESTDB_URL=http://questdb:9000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - default
       - contestant-net

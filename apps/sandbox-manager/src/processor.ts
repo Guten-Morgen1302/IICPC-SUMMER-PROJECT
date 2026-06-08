@@ -218,13 +218,18 @@ export async function processRun(payload: SandboxJobPayload): Promise<ProcessRes
     hostPort: launch.hostPort
   });
 
+  // Determine the host address that other containers can use to reach the sandbox.
+  // In Docker Compose: SANDBOX_HOST=host.docker.internal (set in docker-compose.yml).
+  // In local dev: defaults to 127.0.0.1.
+  const sandboxHost = process.env.SANDBOX_HOST || '127.0.0.1';
+
   // Update DB with container info immediately
   await prisma.benchmarkRun.update({
     where: { id: benchmarkRun.id },
     data: {
       containerId: launch.containerId,
       containerName: launch.containerName,
-      runtimeHost: '127.0.0.1',
+      runtimeHost: sandboxHost,
       runtimePort: launch.hostPort,
       internalPort: launch.internalPort,
       sandboxMetadata: {
@@ -269,7 +274,7 @@ export async function processRun(payload: SandboxJobPayload): Promise<ProcessRes
     status: 'READY',
     containerId: launch.containerId,
     containerName: launch.containerName,
-    runtimeHost: '127.0.0.1',
+    runtimeHost: sandboxHost,
     runtimePort: launch.hostPort,
     internalPort: launch.internalPort,
     readinessAt: readinessAt.toISOString(),
@@ -304,7 +309,7 @@ export async function processRun(payload: SandboxJobPayload): Promise<ProcessRes
     claimed: true,
     benchmarkRunId: benchmarkRun.id,
     status: 'READY',
-    runtimeHost: '127.0.0.1',
+    runtimeHost: sandboxHost,
     runtimePort: launch.hostPort,
     containerId: launch.containerId
   };
