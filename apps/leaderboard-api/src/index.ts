@@ -4,6 +4,7 @@ dotenv.config({ path: path.join(__dirname, '../../../.env') });
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import axios from 'axios';
 import Redis from 'ioredis';
 import { prisma } from '@benchmark/db';
 import { Worker } from 'bullmq';
@@ -18,6 +19,40 @@ const fastify = Fastify({ logger: true });
 fastify.register(cors, { origin: true });
 
 fastify.get('/health', async () => ({ status: 'ok' }));
+
+/**
+ * GET /health/services
+ * Aggregated health check for all backend services.
+ * Called by the frontend Overview page via the Vite proxy — avoids
+ * the browser needing to reach internal service ports directly.
+ */
+const SERVICE_URLS: Record<string, string> = {
+  'submission-api':          process.env.SUBMISSION_API_URL   || 'http://localhost:3001',
+  'build-runner':            process.env.BUILD_RUNNER_URL     || 'http://localhost:3002',
+  'sandbox-manager':         process.env.SANDBOX_MANAGER_URL  || 'http://localhost:3003',
+  'load-generator':          process.env.LOAD_GENERATOR_URL   || 'http://localhost:3004',
+  'telemetry-ingestor':      process.env.TELEMETRY_URL        || 'http://localhost:3005',
+  'correctness-engine':      process.env.CORRECTNESS_URL      || 'http://localhost:3006',
+  'scoring-engine':          process.env.SCORING_URL          || 'http://localhost:3007',
+  'leaderboard-api':         'http://localhost:3008',  // self
+};
+
+fastify.get('/health/services', async (_req, reply) => {
+  const results = await Promise.all(
+    Object.entries(SERVICE_URLS).map(async ([name, baseUrl]) => {
+      try {
+        const res = await axios.get(`${baseUrl}/health`, { timeout: 3000 });
+        return { name, status: res.status >= 200 && res.status < 400 ? 'ok' : 'error' };
+      } catch {
+        return { name, status: 'error' };
+      }
+    })
+  );
+  const healthy = results.every(r => r.status === 'ok');
+  return reply
+    .status(healthy ? 200 : 207)
+    .send({ healthy, services: Object.fromEntries(results.map(r => [r.name, r.status])) });
+});
 
 /**
  * GET /overview
@@ -190,6 +225,8 @@ async function broadcastLeaderboard(): Promise<void> {
 // BullMQ Worker: Process LEADERBOARD queue jobs
 // ═══════════════════════════════════════════════════════════════════
 
+const SANDBOX_MANAGER_URL = process.env.SANDBOX_MANAGER_URL || 'http://localhost:3003';
+
 const worker = new Worker<LeaderboardJobPayload>(
   QUEUES.LEADERBOARD,
   async (job: any) => {
@@ -234,6 +271,13 @@ const worker = new Worker<LeaderboardJobPayload>(
 
       // 🔴 Broadcast live update to all connected WebSocket clients
       await broadcastLeaderboard();
+
+      // 🧹 Sandbox cleanup — fire and forget so it doesn't block the pipeline.
+      // The sandbox container served its purpose; stop and remove it to free
+      // the host port and memory. Errors are logged but not re-thrown.
+      axios.post(`${SANDBOX_MANAGER_URL}/runs/${job.data.benchmarkRunId}/stop`)
+        .then(() => fastify.log.info({ benchmarkRunId: job.data.benchmarkRunId }, 'Sandbox container stopped after pipeline completion'))
+        .catch((err: any) => fastify.log.warn({ benchmarkRunId: job.data.benchmarkRunId, error: err.message }, 'Sandbox stop failed (non-fatal — container may have already exited)'));
 
       return { status: 'UPDATED', score: score.totalScore };
     } catch (err) {

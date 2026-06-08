@@ -77,23 +77,23 @@ export function OverviewPage() {
       setRecentRuns(runs.slice(0, 5))
     }).catch(console.error).finally(() => setLoading(false))
 
-    // Fetch health status
-    const services = [
-      { name: 'submission-api', port: 3001 },
-      { name: 'build-runner', port: 3002 },
-      { name: 'sandbox-manager', port: 3003 },
-      { name: 'load-generator', port: 3004 },
-      { name: 'telemetry-ingestor', port: 3005 },
-      { name: 'correctness-engine', port: 3006 },
-      { name: 'scoring-engine', port: 3007 },
-      { name: 'leaderboard-api', port: 3008 }
-    ]
-
-    services.forEach(svc => {
-      fetch(`http://localhost:${svc.port}/health`)
-        .then(r => setHealthStatus(prev => ({ ...prev, [svc.name]: r.ok ? 'ok' : 'error' })))
-        .catch(() => setHealthStatus(prev => ({ ...prev, [svc.name]: 'error' })))
-    })
+    // Fetch aggregated health status from leaderboard-api, which pings all
+    // services internally (no direct port access from the browser).
+    fetch('/api/health/services')
+      .then(r => r.json())
+      .then((json: { services: Record<string, string> }) => {
+        const mapped: Record<string, 'ok' | 'error' | 'loading'> = {}
+        for (const [name, status] of Object.entries(json.services)) {
+          mapped[name] = status === 'ok' ? 'ok' : 'error'
+        }
+        setHealthStatus(prev => ({ ...prev, ...mapped }))
+      })
+      .catch(() => {
+        // If the health endpoint itself is unreachable, mark all as error
+        setHealthStatus(prev =>
+          Object.fromEntries(Object.keys(prev).map(k => [k, 'error'])) as typeof prev
+        )
+      })
   }, [])
 
   if (loading) return <div className="loading">Initializing systems...</div>

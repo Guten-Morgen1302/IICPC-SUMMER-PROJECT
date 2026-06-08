@@ -41,6 +41,11 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/ws\/leaderboard/, '/')
+      },
+      '/api/health': {
+        target: 'http://127.0.0.1:3008',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, '')
       }
     }
   }

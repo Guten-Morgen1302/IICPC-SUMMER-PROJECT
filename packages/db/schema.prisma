@@ -152,12 +152,8 @@ model CorrectnessReport {
   updatedAt          DateTime     @updatedAt
 }
 
-model LeaderboardEntry {
-  id           String   @id @default(uuid())
-  submissionId String   @unique
-  userId       String
-  score        Float
-  rank         Int?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-}
+// NOTE: LeaderboardEntry model intentionally removed.
+// All leaderboard data is stored in Redis sorted sets (leaderboard:overall,
+// leaderboard:latency, leaderboard:throughput) managed by leaderboard-api.
+// Run `pnpm --filter @benchmark/db prisma db push` after this change to
+// drop the table from the database.

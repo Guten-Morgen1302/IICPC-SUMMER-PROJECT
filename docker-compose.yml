@@ -234,6 +234,13 @@ services:
       - PORT=3008
       - DATABASE_URL=postgresql://${POSTGRES_USER:-benchmark_user}:${POSTGRES_PASSWORD:-benchmark_pass}@postgres:5432/${POSTGRES_DB:-benchmark_db}
       - REDIS_URL=redis://redis:6379
+      - SUBMISSION_API_URL=http://submission-api:3001
+      - BUILD_RUNNER_URL=http://build-runner:3002
+      - SANDBOX_MANAGER_URL=http://sandbox-manager:3003
+      - LOAD_GENERATOR_URL=http://load-generator-controller:3004
+      - TELEMETRY_URL=http://telemetry-ingestor:3005
+      - CORRECTNESS_URL=http://correctness-engine:3006
+      - SCORING_URL=http://scoring-engine:3007
     depends_on:
       postgres:
         condition: service_healthy
