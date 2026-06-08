@@ -235,7 +235,7 @@ export function LeaderboardPage() {
   // Live WebSocket updates
   useEffect(() => {
     const WS_URL = (import.meta.env.VITE_LEADERBOARD_WS_URL as string) ||
-      `ws://${window.location.hostname}:3008`
+      `ws://${window.location.host}/ws/leaderboard`
     let ws: WebSocket | null = null
     let reconnectTimer: ReturnType<typeof setTimeout>
 

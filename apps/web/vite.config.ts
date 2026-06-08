@@ -35,6 +35,12 @@ export default defineConfig({
         target: 'http://127.0.0.1:3001',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/submit-proxy/, '/submit')
+      },
+      '/ws/leaderboard': {
+        target: 'ws://127.0.0.1:3008',
+        ws: true,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ws\/leaderboard/, '/')
       }
     }
   }

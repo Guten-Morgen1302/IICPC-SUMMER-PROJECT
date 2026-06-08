@@ -160,7 +160,7 @@ export function SubmissionDetailPage() {
               {data.benchmarkRuns.slice().reverse().map((run, i) => (
                 <div key={run.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem', background: 'var(--surface-2)', borderRadius: '10px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    {run.status === 'SUCCESS' || run.status === 'EVALUATED' ? <CheckCircle2 size={16} color="var(--success)" /> : <XCircle size={16} color="var(--error)" />}
+                    {run.status === 'SUCCESS' || run.status === 'EVALUATED' || run.status === 'COMPLETED' ? <CheckCircle2 size={16} color="var(--success)" /> : <XCircle size={16} color="var(--error)" />}
                     <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{run.id.slice(0, 8)}</div>
                   </div>
                   <div style={{ fontFamily: 'var(--mono)', fontSize: '0.8rem', color: 'var(--accent)' }}>{run.scoreValue?.toFixed(1) ?? '—'}</div>
