@@ -383,9 +383,10 @@ fastify.get('/submissions', async () => {
       user: true,
       buildJobs: true,
       benchmarkRuns: {
-        where: { status: 'EVALUATED' },
-        orderBy: { createdAt: 'desc' },
-        take: 1
+        // No status filter — include all runs so in-flight submissions
+        // still show their current run count and latest score.
+        // Sorted desc so [0] is the most recent run.
+        orderBy: { createdAt: 'desc' }
       }
     },
     orderBy: { createdAt: 'desc' }
@@ -400,7 +401,8 @@ fastify.get('/submissions', async () => {
     pipelineStatus: s.status,
     originalFilename: s.originalFilename,
     createdAt: s.createdAt.toISOString(),
-    latestScore: s.benchmarkRuns[0]?.scoreValue || null,
+    // Show scoreValue from the most recent EVALUATED run; null if none yet
+    latestScore: s.benchmarkRuns.find(r => r.scoreValue != null)?.scoreValue ?? null,
     buildCount: s.buildJobs.length,
     runCount: s.benchmarkRuns.length,
     sizeBytes: s.sizeBytes?.toString()
