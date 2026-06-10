@@ -11,6 +11,26 @@ function StepIcon({ status }: { status: StepStatus }) {
   return <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--border)', margin: '5px' }} />;
 }
 
+function StepRail({ status }: { status: StepStatus }) {
+  const isActive = status === 'DONE' || status === 'IN_PROGRESS';
+
+  return (
+    <div
+      style={{
+        width: 3,
+        flex: 1,
+        borderRadius: 999,
+        background: isActive
+          ? 'linear-gradient(180deg, rgba(34,197,94,1) 0%, rgba(34,197,94,0.85) 100%)'
+          : 'rgba(255,255,255,0.06)',
+        boxShadow: isActive ? '0 0 12px rgba(34,197,94,0.55)' : 'none',
+        opacity: isActive ? 1 : 0.35,
+        margin: '4px 0'
+      }}
+    />
+  );
+}
+
 export function PipelineView() {
   const { id } = useParams<{ id: string }>();
   const [pipeline, setPipeline] = useState<PipelineState | null>(null);
@@ -61,12 +81,7 @@ export function PipelineView() {
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '24px' }}>
                   <StepIcon status={step.status} />
                   {idx < pipeline.steps.length - 1 && (
-                    <div style={{ 
-                      width: '2px', flex: 1, 
-                      background: step.status === 'DONE' ? 'var(--success)' : 'var(--border)',
-                      opacity: step.status === 'DONE' ? 0.5 : 0.2,
-                      margin: '4px 0' 
-                    }} />
+                    <StepRail status={step.status} />
                   )}
                 </div>
                 <div style={{ flex: 1, paddingBottom: '2.5rem' }}>
